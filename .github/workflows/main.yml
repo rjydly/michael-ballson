@@ -10,34 +10,46 @@ permissions:
   contents: write
 
 jobs:
-  run-bot:
+  repost:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: 1. Checkout
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: 2. Netejar carpeta de vídeos anteriors
+        run: |
+          mkdir -p videos
+          rm -rf videos/*
+          touch videos/.gitkeep
+
+      - name: 3. Setup Python i dependències
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: 4. Instal·lar eines
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install apify-client moviepy requests
 
-      - name: Install dependencies
-        run: pip install apify-client moviepy requests
-
-      - name: Run Bot
+      - name: 5. FASE 1: Processar vídeo
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-          ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
-          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-        run: python main.py
+        run: python main.py process
 
-      - name: Save State
+      - name: 6. Publicar vídeo al repositori (Servidor Raw)
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "ViralBot"
-          git add processed_videos.json
-          git commit -m "Update processed videos [skip ci]" || exit 0
+          git add videos/out.mp4 processed_videos.json caption_temp.txt
+          git commit -m "Allotjant nou vídeo [skip ci]" || exit 0
           git push
+
+      - name: 7. Esperar propagació (10 segons)
+        run: sleep 10
+
+      - name: 8. FASE 2: Cridar API de Zirnio
+        env:
+          ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+        run: python main.py publish
