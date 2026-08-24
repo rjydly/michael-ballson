@@ -1,4 +1,4 @@
-name: Instagram Viral Reposter
+name: Instagram Telegram Bot
 
 on:
   schedule:
@@ -21,30 +21,25 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install dependencies
+      - name: Install System Dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install apify-client moviepy requests
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - name: 1. Process Video (main.py)
+      - name: Install Python Libraries
+        run: pip install apify-client moviepy pyTelegramBotAPI requests
+
+      - name: Run Bot
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python main.py
 
-      - name: 2. Push Video to GitHub
+      - name: Save State
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "ViralBot"
-          git add videos/reels_upload.mp4 processed_videos.json current_author.txt
-          git commit -m "Update media [skip ci]" || exit 0
+          git add processed_videos.json
+          git commit -m "Update DB [skip ci]" || exit 0
           git push
-
-      - name: 3. Wait for CDN
-        run: sleep 60 # Temps vital per a que la URL sigui pública
-
-      - name: 4. Publish to Instagram (publish.py)
-        env:
-          ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
-          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python publish.py
