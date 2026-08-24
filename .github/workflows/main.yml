@@ -10,46 +10,54 @@ permissions:
   contents: write
 
 jobs:
-  repost:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Checkout
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: 2. Netejar carpeta de vídeos anteriors
-        run: |
-          mkdir -p videos
-          rm -rf videos/*
-          touch videos/.gitkeep
-
-      - name: 3. Setup Python i dependències
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 4. Instal·lar eines
-        run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install apify-client moviepy requests
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: 5. FASE 1: Processar vídeo
+      - name: Install dependencies
+        run: pip install apify-client moviepy requests
+
+      - name: Process Video
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-        run: python main.py process
+        run: python main.py
 
-      - name: 6. Publicar vídeo al repositori (Servidor Raw)
+      - name: Commit and Push Video to Repo
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "ViralBot"
-          git add videos/out.mp4 processed_videos.json caption_temp.txt
-          git commit -m "Allotjant nou vídeo [skip ci]" || exit 0
+          git add videos/*.mp4 processed_videos.json
+          git commit -m "Update video for posting [skip ci]" || exit 0
           git push
 
-      - name: 7. Esperar propagació (10 segons)
-        run: sleep 10
-
-      - name: 8. FASE 2: Cridar API de Zirnio
+      - name: Notify Zernio API
         env:
           ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
-          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-        run: python main.py publish
+          INSTAGRAM_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          # URL del vídeo RAW a GitHub (Ajusta el teu usuari i nom de repositori!)
+          # FORMAT: https://raw.githubusercontent.com/<USUARI>/<REPO>/main/videos/reels_upload.mp4
+          VIDEO_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/videos/reels_upload.mp4"
+          # URL de la miniatura a la teva carpeta assets
+          THUMB_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/assets/thumbnail.png"
+        run: |
+          AUTHOR=$(cat current_author.txt)
+          curl -X POST "https://api.zernio.com/v1/posts" \
+          -H "Authorization: Bearer $ZERNIO_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"instagram_account_id\": \"$INSTAGRAM_ID\",
+            \"media_type\": \"REELS\",
+            \"video_url\": \"$VIDEO_URL\",
+            \"cover_url\": \"$THUMB_URL\",
+            \"caption\": \"🔥 Crèdits: @$AUTHOR #reels #viral\"
+          }"
