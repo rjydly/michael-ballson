@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Temporals de vídeo
+temp.mp4
+out.mp4
+
+# Entorn virtual
+venv/
+.env
