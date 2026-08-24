@@ -15,17 +15,28 @@ THUMB_URL = f"https://raw.githubusercontent.com/{REPO}/main/assets/thumbnail.png
 
 def notify_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": message})
+    try:
+        requests.post(url, json={"chat_id": CHAT_ID, "text": message})
+    except:
+        pass
 
-def upload_media(url, kind):
-    print(f"Registrant {kind} a Zernio...")
-    headers = {"Authorization": f"Bearer {ZERNIO_TOKEN}", "Content-Type": "application/json"}
-    payload = {"url": url, "kind": kind}
+def upload_media(url, kind, filename):
+    """Pas 1: Registrar el media a Zernio enviant la URL i el filename"""
+    print(f"Registrant {kind} a Zernio ({filename})...")
+    headers = {
+        "Authorization": f"Bearer {ZERNIO_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    # AFEGIM EL CAMP 'filename' QUE DEMANA L'ERROR
+    payload = {
+        "url": url, 
+        "kind": kind,
+        "filename": filename
+    }
     
     r = requests.post(f"{BASE}/media", headers=headers, json=payload)
     
-    # Si la resposta no és bona, imprimim tot el que diu l'API
-    if r.status_code != 200 and r.status_code != 201:
+    if r.status_code not in [200, 201]:
         error_msg = f"❌ Error Zernio Media ({kind}): {r.status_code} - {r.text}"
         print(error_msg)
         notify_telegram(error_msg)
@@ -42,34 +53,47 @@ def main():
         author = f.read()
     
     caption = f"🔥 Crèdits: @{author} #reels #viral"
-    headers = {"Authorization": f"Bearer {ZERNIO_TOKEN}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {ZERNIO_TOKEN}",
+        "Content-Type": "application/json"
+    }
 
     try:
-        # Pas 1: Registrar Media
-        video_id = upload_media(VIDEO_URL, "video")
-        thumb_id = upload_media(THUMB_URL, "image")
+        # 1. Obtenir IDs de Media (Amb el filename inclòs)
+        video_id = upload_media(VIDEO_URL, "video", "reels_upload.mp4")
+        thumb_id = upload_media(THUMB_URL, "image", "thumbnail.png")
 
-        # Pas 2: Crear el post
+        # 2. Crear el post segons la teva documentació
         payload = {
             "social_account_id": SA_ID,
             "platform": "instagram",
             "type": "video",
             "caption": caption,
-            "media": [{"kind": "video", "media_id": video_id}],
-            "platform_options": {"instagram": {"thumbnail_media_id": thumb_id}}
+            "publish_at": None, # Publicar ara mateix
+            "media": [
+                {
+                    "kind": "video",
+                    "media_id": video_id
+                }
+            ],
+            "platform_options": {
+                "instagram": {
+                    "thumbnail_media_id": thumb_id
+                }
+            }
         }
         
         print("Creant post a Instagram...")
         post_res = requests.post(f"{BASE}/posts", headers=headers, json=payload)
         
-        if post_res.status_code != 200 and post_res.status_code != 201:
+        if post_res.status_code not in [200, 201]:
             error_msg = f"❌ Error Zernio Post: {post_res.status_code} - {post_res.text}"
             print(error_msg)
             notify_telegram(error_msg)
             return
 
         print(f"Èxit: {post_res.json()}")
-        notify_telegram(f"✅ Vídeo de @{author} publicat a Instagram correctament!")
+        notify_telegram(f"✅ Publicat a Instagram: @{author}")
 
     except Exception as e:
         print(f"Error general: {e}")
