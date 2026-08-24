@@ -1,51 +1,43 @@
-name: Instagram Viral Bot
+name: Instagram Viral Reposter
 
 on:
   schedule:
-    # Aquesta configuració executa el bot cada 90 minuts (16 cops al dia)
-    # Hores en punt (parelles): 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00
     - cron: '0 0,3,6,9,12,15,18,21 * * *'
-    # Hores i mitja (senars): 01:30, 04:30, 07:30, 10:30, 13:30, 16:30, 19:30, 22:30
     - cron: '30 1,4,7,10,13,16,19,22 * * *'
-  workflow_dispatch: # Permet execució manual des de GitHub
+  workflow_dispatch:
 
 permissions:
-  contents: write # Necessari per desar el fitxer processed_videos.json
+  contents: write
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 1. Checkout del codi
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: 2. Configurar Python 3.9
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 3. Instal·lar FFMPEG (necessari per a MoviePy)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: 4. Instal·lar llibreries de Python
-        run: |
-          python -m pip install --upgrade pip
-          pip install apify-client moviepy pyTelegramBotAPI requests
+      - name: Install dependencies
+        run: pip install apify-client moviepy requests
 
-      - name: 5. Executar el Bot
+      - name: Run Bot
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
         run: python main.py
 
-      - name: 6. Guardar els canvis (Vídeos ja processats)
+      - name: Save State
         run: |
           git config --local user.email "bot@github.com"
-          git config --local user.name "InstagramViralBot"
+          git config --local user.name "ViralBot"
           git add processed_videos.json
-          git commit -m "Actualització de la llista de vídeos [skip ci]" || exit 0
+          git commit -m "Update processed videos [skip ci]" || exit 0
           git push
