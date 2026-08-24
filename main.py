@@ -13,7 +13,7 @@ except (ImportError, ModuleNotFoundError):
     try:
         from moviepy import VideoFileClip
     except ImportError:
-        print("Error: No s'ha pogut importar MoviePy.")
+        print("Error: MoviePy no trobat.")
 
 # --- CONFIGURACIÓ ---
 APIFY_TOKEN = os.getenv('APIFY_TOKEN')
@@ -29,25 +29,26 @@ def load_accounts():
         return [line.strip() for line in f if "instagram.com" in line]
 
 def process_and_send(video_data, bot, processed_ids):
-    """Funció interna per processar el vídeo i enviar-lo."""
+    """Processa amb correcció de dimensions, àudio i còdecs per a mòbil."""
     v_id = video_data["id"]
     video_url = video_data.get("videoUrl")
     username = video_data.get("ownerUsername", "Instagram")
+    likes = video_data.get("likesCount", 0)
 
-    print(f"Descarregant vídeo de @{username}...")
+    print(f"Processant vídeo de @{username} ({likes} likes)...")
     res = requests.get(video_url)
     with open("temp.mp4", "wb") as f:
         f.write(res.content)
 
-    print("Processant vídeo...")
     clip = VideoFileClip("temp.mp4")
     
-    # Dimensions parelles per a H.264
+    # Fix dimensions parelles
     target_h = 720
     w, h = clip.size
     target_w = int(w * (target_h / h))
     if target_w % 2 != 0: target_w -= 1
 
+    # Fix versió MoviePy
     try:
         if hasattr(clip, "resized"):
             clip = clip.resized(new_size=(target_w, target_h))
@@ -55,6 +56,7 @@ def process_and_send(video_data, bot, processed_ids):
             clip = clip.resize(new_size=(target_w, target_h))
     except: pass
 
+    # Escriptura amb àudio forçat i format de colors per a mòbil
     clip.write_videofile(
         "out.mp4", 
         codec="libx264", 
@@ -67,9 +69,8 @@ def process_and_send(video_data, bot, processed_ids):
     clip.close()
 
     with open("out.mp4", "rb") as v:
-        bot.send_video(CHAT_ID, v, caption=f"🔥 Nou vídeo de @{username}")
+        bot.send_video(CHAT_ID, v, caption=f"🔥 Viral de @{username}\n❤️ {likes} likes")
 
-    # Guardar a la base de dades
     processed_ids.append(v_id)
     with open(DB_FILE, 'w') as f:
         json.dump(processed_ids[-500:], f)
@@ -88,43 +89,48 @@ def main():
     else:
         processed_ids = []
 
-    # LÒGICA DE REINTENT: Provarem fins a 2 comptes diferents
-    MAX_ATTEMPTS = 2
-    video_trobat = False
-
-    for attempt in range(MAX_ATTEMPTS):
+    video_enviat = False
+    
+    # ESTRATÈGIA D'ESTALVI:
+    # Intent 1: Demanem 2 posts per triar el millor.
+    # Intent 2: Si cal, demanem només 1 post d'un altre compte.
+    for attempt in range(2):
+        limit = 2 if attempt == 0 else 1
         selected_account = random.choice(all_accounts)
-        print(f"Intent {attempt+1}: Provant compte {selected_account}")
+        
+        print(f"Intent {attempt+1} ({limit} post/s): {selected_account}")
 
-        # Demanem 3 posts per tenir marge (penúltims, etc.)
         run_input = {
             "directUrls": [selected_account],
             "resultsType": "posts",
-            "resultsLimit": 3, 
-            "onlyPostsNewerThan": "2 days" # Donem 2 dies de marge
+            "resultsLimit": limit, 
+            "onlyPostsNewerThan": "2 days"
         }
 
         try:
             run = client.actor("apify/instagram-api-scraper").call(run_input=run_input)
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
             
-            # Busquem el primer vídeo de la llista que no haguem enviat
-            for item in items:
-                if (item.get("videoUrl") or item.get("type") == "Video") and item.get("id") not in processed_ids:
-                    video_trobat = process_and_send(item, bot, processed_ids)
-                    break
-            
-            if video_trobat:
-                print("Vídeo trobat i enviat amb èxit.")
+            # Filtrem vídeos nous
+            candidates = [
+                i for i in items 
+                if (i.get("videoUrl") or i.get("type") == "Video") 
+                and i.get("id") not in processed_ids
+            ]
+
+            if candidates:
+                # Si n'hi ha més d'un, agafem el que té més likes
+                candidates.sort(key=lambda x: x.get("likesCount", 0), reverse=True)
+                video_enviat = process_and_send(candidates[0], bot, processed_ids)
                 break
             else:
-                print(f"No hi ha vídeos nous al compte {selected_account}.")
+                print(f"No hi ha res nou a {selected_account}.")
         
         except Exception as e:
-            print(f"Error en l'intent {attempt+1}: {e}")
+            print(f"Error: {e}")
 
-    if not video_trobat:
-        print("S'han esgotat els intents i no s'ha trobat cap vídeo nou a cap compte.")
+    if not video_enviat:
+        print("S'han esgotat els intents sense trobar contingut nou.")
 
 if __name__ == "__main__":
     main()
