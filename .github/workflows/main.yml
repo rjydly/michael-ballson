@@ -21,47 +21,30 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
       - name: Install dependencies
-        run: pip install apify-client moviepy requests
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install apify-client moviepy requests
 
-      - name: Process Video
+      - name: 1. Process Video (main.py)
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: python main.py
 
-      - name: Commit and Push
+      - name: 2. Push Video to GitHub
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "ViralBot"
-          git add videos/reels_upload.mp4 processed_videos.json
-          git commit -m "Update video [skip ci]" || exit 0
+          git add videos/reels_upload.mp4 processed_videos.json current_author.txt
+          git commit -m "Update media [skip ci]" || exit 0
           git push
 
-      - name: Wait for CDN
-        run: sleep 60
+      - name: 3. Wait for CDN
+        run: sleep 60 # Temps vital per a que la URL sigui pública
 
-      - name: Notify Zernio API
+      - name: 4. Publish to Instagram (publish.py)
         env:
           ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
-          INSTAGRAM_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-          VIDEO_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/videos/reels_upload.mp4"
-          THUMB_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/assets/thumbnail.png"
-        run: |
-          AUTHOR=$(cat current_author.txt)
-          # HE CANVIAT LA URL A ZERNIO (AMB E)
-          RESPONSE=$(curl -s -X POST "https://api.zernio.com/v1/posts" \
-          -H "Authorization: Bearer $ZERNIO_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d "{
-            \"instagram_account_id\": \"$INSTAGRAM_ID\",
-            \"media_type\": \"REELS\",
-            \"video_url\": \"$VIDEO_URL\",
-            \"cover_url\": \"$THUMB_URL\",
-            \"caption\": \"🔥 Crèdits: @$AUTHOR #reels #viral\"
-          }")
-          
-          echo "Resposta: $RESPONSE"
-          if [[ $RESPONSE == *"error"* ]]; then exit 1; fi
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python publish.py
