@@ -1,0 +1,4 @@
+apify-client
+moviepy
+pyTelegramBotAPI
+requests
