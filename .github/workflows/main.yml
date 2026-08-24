@@ -1,0 +1,42 @@
+name: Instagram Viral Bot
+
+on:
+  schedule:
+    - cron: '*/72 * * * *' # Cada 72 minuts (~20 cops al dia)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install apify-client moviepy pyTelegramBotAPI requests
+
+      - name: Execute
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
+
+      - name: Commit State
+        run: |
+          git config --local user.email "bot@github.com"
+          git config --local user.name "ViralBot"
+          git add processed_videos.json
+          git commit -m "Update DB [skip ci]" || exit 0
+          git push
