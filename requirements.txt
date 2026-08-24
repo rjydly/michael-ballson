@@ -1,4 +1,4 @@
-apify-client
-moviepy
-pyTelegramBotAPI
-requests
+apify-client==1.8.1
+moviepy==2.1.1
+pyTelegramBotAPI==4.22.1
+requests==2.32.3
