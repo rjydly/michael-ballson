@@ -69,37 +69,38 @@ def main():
     video_url = video_data.get("videoUrl")
     username = video_data.get("ownerUsername", "Instagram")
 
-    print(f"Descarregant @{username}...")
+    print(f"Descarregant vídeo de @{username}...")
     res = requests.get(video_url)
     with open("temp.mp4", "wb") as f:
         f.write(res.content)
 
-    # --- PROCESSAMENT AMB CORRECCIÓ DE DIMENSIONS ---
-    print("Processant vídeo...")
+    # --- PROCESSAMENT ---
+    print("Processant vídeo i àudio...")
     clip = VideoFileClip("temp.mp4")
     
-    # Calculem les noves dimensions assegurant que siguin PARELLES (divisibles per 2)
+    # Dimensions parelles (Fix anterior)
     target_h = 720
     w, h = clip.size
     target_w = int(w * (target_h / h))
-    
-    if target_w % 2 != 0:
-        target_w -= 1  # Si és senar (com 405), el convertim en parell (404)
+    if target_w % 2 != 0: target_w -= 1
 
-    # Redimensionar segons versió de MoviePy
+    # Redimensionar
     try:
         if hasattr(clip, "resized"):
-            clip = clip.resized(new_size=(target_w, target_h)) # v2.x
+            clip = clip.resized(new_size=(target_w, target_h))
         else:
-            clip = clip.resize(new_size=(target_w, target_h))  # v1.x
+            clip = clip.resize(new_size=(target_w, target_h))
     except Exception as e:
         print(f"Error redimensionant: {e}")
 
-    # Escriptura amb paràmetres de compatibilitat mòbil
+    # --- ESCRIPTURA DEL FITXER AMB ÀUDIO FORÇAT ---
     clip.write_videofile(
         "out.mp4", 
         codec="libx264", 
-        audio_codec="aac",
+        audio_codec="aac",        # Còdec d'àudio estàndard
+        audio=True,               # Forcem que hi hagi àudio
+        temp_audiofile='temp-audio.m4a', # Fitxer temporal per evitar errors de buffer
+        remove_temp=True,         # Esborra el temporal en acabar
         ffmpeg_params=["-pix_fmt", "yuv420p"]
     )
     clip.close()
@@ -108,6 +109,7 @@ def main():
     with open("out.mp4", "rb") as v:
         bot.send_video(CHAT_ID, v, caption=f"🔥 Nou vídeo de @{username}")
 
+    # Guardar ID
     processed_ids.append(v_id)
     with open(DB_FILE, 'w') as f:
         json.dump(processed_ids[-500:], f)
