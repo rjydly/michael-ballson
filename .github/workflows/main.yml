@@ -1,4 +1,4 @@
-name: Instagram Telegram Bot
+name: Instagram Viral Reposter
 
 on:
   schedule:
@@ -13,33 +13,40 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: 1. Checkout
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: 2. Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install System Dependencies
+      - name: 3. Install ffmpeg & libs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install apify-client moviepy requests
 
-      - name: Install Python Libraries
-        run: pip install apify-client moviepy pyTelegramBotAPI requests
-
-      - name: Run Bot
+      - name: 4. Scrape and Process (main.py)
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python main.py
 
-      - name: Save State
+      - name: 5. Git Push Video to Repo (Hosting)
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "ViralBot"
-          git add processed_videos.json
-          git commit -m "Update DB [skip ci]" || exit 0
+          git add videos/reels_upload.mp4 processed_videos.json current_author.txt
+          git commit -m "New video for CDN [skip ci]" || exit 0
           git push
+
+      - name: 6. Wait for GitHub CDN
+        run: sleep 60 # Molt important per a que la URL raw funcioni
+
+      - name: 7. Publish to Zernio (publish.py)
+        env:
+          ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python publish.py
