@@ -36,22 +36,26 @@ jobs:
         run: |
           git config --local user.email "bot@github.com"
           git config --local user.name "ViralBot"
-          git add videos/*.mp4 processed_videos.json
+          # Esborrem vídeos vells de l'historial de Git i afegim el nou
+          git add videos/reels_upload.mp4 processed_videos.json
           git commit -m "Update video for posting [skip ci]" || exit 0
           git push
+
+      - name: Wait for GitHub CDN (Molt Important)
+        run: sleep 60 # Esperem 60 segons perquè la URL RAW estigui activa
 
       - name: Notify Zernio API
         env:
           ZERNIO_TOKEN: ${{ secrets.ZERNIO_TOKEN }}
           INSTAGRAM_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-          # URL del vídeo RAW a GitHub (Ajusta el teu usuari i nom de repositori!)
-          # FORMAT: https://raw.githubusercontent.com/<USUARI>/<REPO>/main/videos/reels_upload.mp4
+          # REVISA QUE AQUESTA URL SIGUI PÚBLICA (Entra-hi manualment per provar)
           VIDEO_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/videos/reels_upload.mp4"
-          # URL de la miniatura a la teva carpeta assets
           THUMB_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/assets/thumbnail.png"
         run: |
           AUTHOR=$(cat current_author.txt)
-          curl -X POST "https://api.zernio.com/v1/posts" \
+          echo "Publicant vídeo de @$AUTHOR a Instagram..."
+          
+          RESPONSE=$(curl -s -X POST "https://api.zirnio.com/v1/posts" \
           -H "Authorization: Bearer $ZERNIO_TOKEN" \
           -H "Content-Type: application/json" \
           -d "{
@@ -60,4 +64,12 @@ jobs:
             \"video_url\": \"$VIDEO_URL\",
             \"cover_url\": \"$THUMB_URL\",
             \"caption\": \"🔥 Crèdits: @$AUTHOR #reels #viral\"
-          }"
+          }")
+          
+          echo "Resposta de Zernio: $RESPONSE"
+          
+          # Si Zernio respon amb error, volem que el workflow falli per saber-ho
+          if [[ $RESPONSE == *"error"* ]]; then
+            echo "Error detectat en la publicació."
+            exit 1
+          fi
