@@ -20,18 +20,18 @@ def notify_telegram(message):
     except:
         pass
 
-def upload_media(url, kind, filename):
-    """Pas 1: Registrar el media a Zernio enviant la URL i el filename"""
+def upload_media(url, kind, filename, content_type):
+    """Pas 1: Registrar el media a Zernio enviant URL, filename i contentType"""
     print(f"Registrant {kind} a Zernio ({filename})...")
     headers = {
         "Authorization": f"Bearer {ZERNIO_TOKEN}",
         "Content-Type": "application/json"
     }
-    # AFEGIM EL CAMP 'filename' QUE DEMANA L'ERROR
     payload = {
         "url": url, 
         "kind": kind,
-        "filename": filename
+        "filename": filename,
+        "contentType": content_type # AFEGIM EL CAMP QUE DEMANA L'ERROR
     }
     
     r = requests.post(f"{BASE}/media", headers=headers, json=payload)
@@ -59,17 +59,17 @@ def main():
     }
 
     try:
-        # 1. Obtenir IDs de Media (Amb el filename inclòs)
-        video_id = upload_media(VIDEO_URL, "video", "reels_upload.mp4")
-        thumb_id = upload_media(THUMB_URL, "image", "thumbnail.png")
+        # 1. Registrar Media amb els Content-Type correctes
+        video_id = upload_media(VIDEO_URL, "video", "reels_upload.mp4", "video/mp4")
+        thumb_id = upload_media(THUMB_URL, "image", "thumbnail.png", "image/png")
 
-        # 2. Crear el post segons la teva documentació
+        # 2. Crear el post (Seguint exactament el teu exemple de doc)
         payload = {
             "social_account_id": SA_ID,
             "platform": "instagram",
             "type": "video",
             "caption": caption,
-            "publish_at": None, # Publicar ara mateix
+            "publish_at": None, # Publicar immediatament
             "media": [
                 {
                     "kind": "video",
