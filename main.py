@@ -4,6 +4,7 @@ import json
 import random
 import requests
 from apify_client import ApifyClient
+from datetime import datetime, timedelta, timezone
 
 # --- INTENT DE MOVIEPY ---
 try:
@@ -69,17 +70,37 @@ def process_video(video_url, output_path):
     os.remove("temp.mp4")
     print(f"Vídeo processat i guardat a {output_path}")
 
-def upload_to_fileio(file_path):
-    """Puja un fitxer a File.io i retorna la URL pública (vàlida 24h)."""
-    print(f"Pujant {file_path} a File.io...")
+def upload_to_temp_sh(file_path):
+    """
+    Puja un fitxer a temp.sh (https://temp.sh) i retorna la URL pública.
+    Aquest servei no requereix registre i accepta fitxers grans.
+    """
+    print(f"Pujant {file_path} a temp.sh...")
+    with open(file_path, 'rb') as f:
+        files = {'file': (os.path.basename(file_path), f, 'video/mp4' if file_path.endswith('.mp4') else 'image/png')}
+        # temp.sh accepta upload via POST a /upload
+        resp = requests.post('https://temp.sh/upload', files=files, timeout=120)
+        resp.raise_for_status()
+        
+        # temp.sh retorna HTML amb la URL, l'hem d'extreure
+        # Busquem el text que conté la URL
+        import re
+        match = re.search(r'https://temp\.sh/[a-zA-Z0-9]+', resp.text)
+        if not match:
+            raise Exception("No s'ha pogut extreure la URL de temp.sh")
+        return match.group(0)
+
+def upload_to_0x0_st(file_path):
+    """
+    Alternativa: Puja a 0x0.st (https://0x0.st)
+    """
+    print(f"Pujant {file_path} a 0x0.st...")
     with open(file_path, 'rb') as f:
         files = {'file': f}
-        resp = requests.post('https://file.io', files=files, timeout=120)
+        resp = requests.post('https://0x0.st', files=files, timeout=120)
         resp.raise_for_status()
-        data = resp.json()
-        if not data.get('success'):
-            raise Exception("File.io no ha acceptat el fitxer")
-        return data['link']
+        # 0x0.st retorna directament la URL en text pla
+        return resp.text.strip()
 
 def create_zernio_post(video_url, thumb_url, caption, social_account_id):
     """
@@ -92,7 +113,6 @@ def create_zernio_post(video_url, thumb_url, caption, social_account_id):
     }
     
     # Generem scheduled_at per a 10 minuts en el futur (format ISO)
-    from datetime import datetime, timedelta, timezone
     scheduled_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
     
     payload = {
@@ -114,6 +134,16 @@ def create_zernio_post(video_url, thumb_url, caption, social_account_id):
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
     resp.raise_for_status()
     return resp.json()
+
+def upload_file(file_path):
+    """
+    Intenta pujar a temp.sh, si falla usa 0x0.st
+    """
+    try:
+        return upload_to_temp_sh(file_path)
+    except Exception as e:
+        print(f"temp.sh ha fallat: {e}, provant 0x0.st...")
+        return upload_to_0x0_st(file_path)
 
 def main():
     # Comprovar tokens
@@ -181,9 +211,9 @@ def main():
             output_path = os.path.join(VIDEO_DIR, output_filename)
             process_video(video_url, output_path)
             
-            # Pujar a File.io
-            video_file_url = upload_to_fileio(output_path)
-            thumb_file_url = upload_to_fileio(THUMB_PATH)
+            # Pujar a servei d'emmagatzematge temporal
+            video_file_url = upload_file(output_path)
+            thumb_file_url = upload_file(THUMB_PATH)
             print(f"Video URL: {video_file_url}")
             print(f"Thumb URL: {thumb_file_url}")
             
@@ -201,8 +231,8 @@ def main():
             with open(DB_FILE, 'w') as f:
                 json.dump(processed_ids[-500:], f)
             
-            # Netejar fitxers locals
-            # os.remove(output_path)  # Opcional
+            # Netejar fitxers locals (opcional)
+            # os.remove(output_path)
             
             video_publicat = True
             break
