@@ -123,8 +123,8 @@ def push_to_github_and_get_raw_url(filepath):
     return raw_url
 
 def publish_to_buffer(video_public_url, caption):
-    """Publica el vídeo a la cua de Buffer utilitzant el primer frame com a portada i especifica el tipus 'reel'."""
-    print("Enviant a la cua de Buffer...")
+    """Publica el vídeo DIRECTAMENT a Instagram utilitzant el primer frame com a portada."""
+    print("Publicant directament a Instagram via Buffer...")
     
     query = """
     mutation CreatePost($input: CreatePostInput!) {
@@ -146,7 +146,7 @@ def publish_to_buffer(video_public_url, caption):
             "text": caption,
             "channelId": BUFFER_CHANNEL_ID,
             "schedulingType": "automatic",
-            "mode": "addToQueue",
+            "mode": "shareNow",  # CANVIAT: Publica immediatament en lloc d'anar a la cua
             "assets": [
                 {
                     "video": {
@@ -181,7 +181,7 @@ def publish_to_buffer(video_public_url, caption):
     if "message" in post_data:
         raise Exception(f"Error de Buffer: {post_data['message']}")
 
-    print("✅ Publicació enviada correctament a la cua de Buffer!")
+    print("🚀 Publicació enviada i publicada immediatament a Instagram!")
 
 def main():
     if not GITHUB_REPOSITORY:
