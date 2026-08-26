@@ -1,6 +1,7 @@
 import os
 import csv
 import json
+import time
 import random
 import requests
 import subprocess
@@ -98,23 +99,26 @@ def process_video(video_url):
     return output_path
 
 def push_to_github_and_get_raw_url(filepath):
-    """Pushea el nou vídeo a GitHub i retorna la URL Raw associada al commit."""
+    """Pushea el nou vídeo a GitHub (forçant el fitxer .mp4) i retorna la URL Raw de la branca main."""
     print("Pusheant el nou vídeo a GitHub...")
     
     subprocess.run(["git", "config", "--local", "user.email", "bot@github.com"], check=True)
     subprocess.run(["git", "config", "--local", "user.name", "ViralBot"], check=True)
     
-    subprocess.run(["git", "add", "-A", VIDEOS_DIR], check=True)
+    # AFECU -f PER FORÇAR LA PUJADA EN CAS QUE .gitignore IGNORI FITXERS .mp4
+    subprocess.run(["git", "add", "-f", filepath], check=True)
     subprocess.run(["git", "add", DB_FILE], check=True)
     
     commit_res = subprocess.run(["git", "commit", "-m", "Actualitzar vídeo per a Buffer [skip ci]"])
     if commit_res.returncode == 0:
         subprocess.run(["git", "push"], check=True)
-    
-    commit_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
+        print("Esperant 5 segons per a la propagació de GitHub Raw...")
+        time.sleep(5)
     
     filename = os.path.basename(filepath)
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/{commit_sha}/{VIDEOS_DIR}/{filename}"
+    
+    # URL de la branca 'main'
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{filename}"
     print(f"🔗 URL pública de GitHub generada: {raw_url}")
     return raw_url
 
