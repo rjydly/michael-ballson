@@ -22,6 +22,9 @@ BUFFER_ACCESS_TOKEN = os.getenv('BUFFER_ACCESS_TOKEN')
 BUFFER_CHANNEL_ID = os.getenv('BUFFER_CHANNEL_ID')
 GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
+# Variable per al text de la publicació (es pot canviar manualment des d'aquí)
+DEFAULT_CAPTION = "Tonight, V stepped into the crowd, taking in live performances at Vogue World: Hollywood. Known for his own standout fashion moments, he kept it effortlessly stylish in a look worthy of the runway."
+
 DB_FILE = 'processed_videos.json'
 ACCOUNTS_FILE = 'accounts.csv'
 VIDEOS_DIR = 'videos'
@@ -105,7 +108,6 @@ def push_to_github_and_get_raw_url(filepath):
     subprocess.run(["git", "config", "--local", "user.email", "bot@github.com"], check=True)
     subprocess.run(["git", "config", "--local", "user.name", "ViralBot"], check=True)
     
-    # AFECU -f PER FORÇAR LA PUJADA EN CAS QUE .gitignore IGNORI FITXERS .mp4
     subprocess.run(["git", "add", "-f", filepath], check=True)
     subprocess.run(["git", "add", DB_FILE], check=True)
     
@@ -116,8 +118,6 @@ def push_to_github_and_get_raw_url(filepath):
         time.sleep(5)
     
     filename = os.path.basename(filepath)
-    
-    # URL de la branca 'main'
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{filename}"
     print(f"🔗 URL pública de GitHub generada: {raw_url}")
     return raw_url
@@ -229,8 +229,8 @@ def main():
                 
                 raw_url = push_to_github_and_get_raw_url(output_file)
                 
-                caption = f"🔥 Original de @{best_video.get('ownerUsername')}\n❤️ {best_video.get('likesCount')} likes"
-                publish_to_buffer(raw_url, caption)
+                # Fent servir el caption per defecte configurat al principi
+                publish_to_buffer(raw_url, DEFAULT_CAPTION)
                 
                 video_enviat = True
                 break
