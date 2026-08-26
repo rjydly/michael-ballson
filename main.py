@@ -19,7 +19,7 @@ except (ImportError, ModuleNotFoundError):
 APIFY_TOKEN = os.getenv('APIFY_TOKEN')
 BUFFER_ACCESS_TOKEN = os.getenv('BUFFER_ACCESS_TOKEN')
 BUFFER_CHANNEL_ID = os.getenv('BUFFER_CHANNEL_ID')
-GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY') # Format: "usuari/repositori"
+GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
 DB_FILE = 'processed_videos.json'
 ACCOUNTS_FILE = 'accounts.csv'
@@ -104,7 +104,6 @@ def push_to_github_and_get_raw_url(filepath):
     subprocess.run(["git", "config", "--local", "user.email", "bot@github.com"], check=True)
     subprocess.run(["git", "config", "--local", "user.name", "ViralBot"], check=True)
     
-    # Afegir canvis a la carpeta videos i a l'historial
     subprocess.run(["git", "add", "-A", VIDEOS_DIR], check=True)
     subprocess.run(["git", "add", DB_FILE], check=True)
     
@@ -112,17 +111,15 @@ def push_to_github_and_get_raw_url(filepath):
     if commit_res.returncode == 0:
         subprocess.run(["git", "push"], check=True)
     
-    # Obtenir el SHA de l'últim commit
     commit_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
     
-    # Construir la URL Raw
     filename = os.path.basename(filepath)
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/{commit_sha}/{VIDEOS_DIR}/{filename}"
     print(f"🔗 URL pública de GitHub generada: {raw_url}")
     return raw_url
 
 def publish_to_buffer(video_public_url, caption):
-    """Publica el vídeo a la cua de Buffer utilitzant el primer frame com a portada."""
+    """Publica el vídeo a la cua de Buffer utilitzant el primer frame com a portada i especifica el tipus 'reel'."""
     print("Enviant a la cua de Buffer...")
     
     query = """
@@ -155,7 +152,13 @@ def publish_to_buffer(video_public_url, caption):
                         }
                     }
                 }
-            ]
+            ],
+            "metadata": {
+                "instagram": {
+                    "type": "reel",
+                    "shouldShareToFeed": True
+                }
+            }
         }
     }
 
@@ -181,7 +184,6 @@ def main():
         print("Error: La variable GITHUB_REPOSITORY no està definida.")
         return
 
-    # 1. Netejar la carpeta videos/ abans de començar
     clean_videos_folder()
 
     client = ApifyClient(APIFY_TOKEN)
@@ -216,17 +218,13 @@ def main():
                 candidates.sort(key=lambda x: x.get("likesCount", 0), reverse=True)
                 best_video = candidates[0]
                 
-                # 2. Processar el vídeo i desar-lo a videos/out.mp4
                 output_file = process_video(best_video["videoUrl"])
                 
-                # Guardar ID a l'historial abans de fer push
                 processed_ids.append(best_video["id"])
                 with open(DB_FILE, 'w') as f: json.dump(processed_ids[-500:], f)
                 
-                # 3. Fer push a GitHub i obtenir la URL Raw
                 raw_url = push_to_github_and_get_raw_url(output_file)
                 
-                # 4. Enviar a Buffer
                 caption = f"🔥 Original de @{best_video.get('ownerUsername')}\n❤️ {best_video.get('likesCount')} likes"
                 publish_to_buffer(raw_url, caption)
                 
