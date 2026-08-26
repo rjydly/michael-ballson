@@ -5,14 +5,16 @@ import time
 import random
 import requests
 import subprocess
+import numpy as np
+from PIL import Image, ImageFilter
 from apify_client import ApifyClient
 
 # --- IMPORTACIÓ ROBUSTA DE MOVIEPY ---
 try:
-    from moviepy.editor import VideoFileClip, ImageClip, concatenate_videoclips
+    from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips
 except (ImportError, ModuleNotFoundError):
     try:
-        from moviepy import VideoFileClip, ImageClip, concatenate_videoclips
+        from moviepy import VideoFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips
     except ImportError:
         print("Error: No s'ha trobat MoviePy.")
 
@@ -22,7 +24,7 @@ BUFFER_ACCESS_TOKEN = os.getenv('BUFFER_ACCESS_TOKEN')
 BUFFER_CHANNEL_ID = os.getenv('BUFFER_CHANNEL_ID')
 GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
-# Variable per al text de la publicació (es pot canviar manualment des d'aquí)
+# Variable per al text de la publicació (es pot canviar manualment)
 DEFAULT_CAPTION = "Tonight, V stepped into the crowd, taking in live performances at Vogue World: Hollywood. Known for his own standout fashion moments, he kept it effortlessly stylish in a look worthy of the runway."
 
 DB_FILE = 'processed_videos.json'
@@ -48,39 +50,76 @@ def clean_videos_folder():
                 os.remove(file_path)
         print("Carpeta netejada correctament.")
 
+def make_blurred_background(frame):
+    """Genera un fotograma desenfocat (blur) ultrarràpid per al fons 9:16."""
+    pil_img = Image.fromarray(frame)
+    resampling = getattr(Image, 'Resampling', Image).BILINEAR
+    # Reduir mida per a un efecte blur molt més ràpid i suau
+    small = pil_img.resize((108, 192), resampling)
+    blurred = small.filter(ImageFilter.GaussianBlur(radius=8))
+    large = blurred.resize((1080, 1920), resampling)
+    # Fosquejar lleugerament el fons per fer ressaltar el vídeo central
+    dark_frame = (np.array(large) * 0.65).astype(np.uint8)
+    return dark_frame
+
 def process_video(video_url):
-    """Descarrega el vídeo, afegeix la thumbnail al frame 0 i el guarda a videos/out.mp4."""
+    """Descarrega el vídeo, el força a 9:16 (1080x1920) amb fons de blur si cal, i afegeix la thumbnail al frame 0."""
     print("Descarregant vídeo...")
     res = requests.get(video_url)
     temp_path = "temp.mp4"
     with open(temp_path, "wb") as f:
         f.write(res.content)
 
-    print("Processant vídeo a 1080p i afegint la portada al primer frame...")
+    print("Processant vídeo a format vertical 9:16 (1080x1920)...")
     clip = VideoFileClip(temp_path)
     
-    # Calcular dimensions parelles a 1080p
-    target_h = 1080
+    target_w, target_h = 1080, 1920
     w, h = clip.size
-    target_w = int(w * (target_h / h))
-    if target_w % 2 != 0: target_w -= 1
+    aspect_ratio = w / h
+    target_aspect = target_w / target_h # ~0.5625
 
-    # Redimensionar el vídeo principal
-    if hasattr(clip, "resized"):
-        clip = clip.resized(new_size=(target_w, target_h))
+    # Comprovar si el vídeo NO té format 9:16 (marge de tolerància 0.03)
+    if abs(aspect_ratio - target_aspect) > 0.03:
+        print("El vídeo no és 9:16. Generant fons de blur i centrant el vídeo...")
+        
+        # 1. Crear el fons desenfocat (blur)
+        bg_clip = clip.resized(new_size=(target_w, target_h)) if hasattr(clip, "resized") else clip.resize(new_size=(target_w, target_h))
+        if hasattr(bg_clip, "image_transform"):
+            bg_clip = bg_clip.image_transform(make_blurred_background)
+        else:
+            bg_clip = bg_clip.fl_image(make_blurred_background)
+
+        # 2. Redimensionar el vídeo principal per a que cabiga al centre
+        scale = min(target_w / w, target_h / h)
+        fg_w = int(w * scale)
+        fg_h = int(h * scale)
+        if fg_w % 2 != 0: fg_w -= 1
+        if fg_h % 2 != 0: fg_h -= 1
+
+        fg_clip = clip.resized(new_size=(fg_w, fg_h)) if hasattr(clip, "resized") else clip.resize(new_size=(fg_w, fg_h))
+        
+        # Posicionar al centre
+        if hasattr(fg_clip, "with_position"):
+            fg_clip = fg_clip.with_position(('center', 'center'))
+        else:
+            fg_clip = fg_clip.set_position(('center', 'center'))
+
+        # Superposar vídeo centrat sobre el fons de blur
+        video_916 = CompositeVideoClip([bg_clip, fg_clip], size=(target_w, target_h))
     else:
-        clip = clip.resize(new_size=(target_w, target_h))
+        print("El vídeo ja és en format 9:16.")
+        video_916 = clip.resized(new_size=(target_w, target_h)) if hasattr(clip, "resized") else clip.resize(new_size=(target_w, target_h))
 
-    # Afegeix la thumbnail d'assets/thumbnail.png al primer frame
+    # Afegeix la thumbnail d'assets/thumbnail.png al primer frame (0.1s)
     thumb_path = os.path.join("assets", "thumbnail.png")
     if os.path.exists(thumb_path):
         img = ImageClip(thumb_path)
         thumb_clip = img.with_duration(0.1) if hasattr(img, "with_duration") else img.set_duration(0.1)
         thumb_clip = thumb_clip.resized(new_size=(target_w, target_h)) if hasattr(thumb_clip, "resized") else thumb_clip.resize(new_size=(target_w, target_h))
-        final_clip = concatenate_videoclips([thumb_clip, clip])
+        final_clip = concatenate_videoclips([thumb_clip, video_916])
     else:
         print("⚠️ Avís: No s'ha trobat assets/thumbnail.png. Es processarà sense portada.")
-        final_clip = clip
+        final_clip = video_916
 
     # Guardar a la carpeta videos/
     output_path = os.path.join(VIDEOS_DIR, "out.mp4")
@@ -94,6 +133,7 @@ def process_video(video_url):
         ffmpeg_params=["-pix_fmt", "yuv420p"]
     )
     clip.close()
+    video_916.close()
     if os.path.exists(thumb_path):
         final_clip.close()
     if os.path.exists(temp_path):
@@ -146,7 +186,7 @@ def publish_to_buffer(video_public_url, caption):
             "text": caption,
             "channelId": BUFFER_CHANNEL_ID,
             "schedulingType": "automatic",
-            "mode": "shareNow",  # CANVIAT: Publica immediatament en lloc d'anar a la cua
+            "mode": "shareNow",
             "assets": [
                 {
                     "video": {
@@ -229,7 +269,6 @@ def main():
                 
                 raw_url = push_to_github_and_get_raw_url(output_file)
                 
-                # Fent servir el caption per defecte configurat al principi
                 publish_to_buffer(raw_url, DEFAULT_CAPTION)
                 
                 video_enviat = True
