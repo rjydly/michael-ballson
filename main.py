@@ -5,16 +5,14 @@ import time
 import random
 import requests
 import subprocess
-import numpy as np
-from PIL import Image, ImageFilter
 from apify_client import ApifyClient
 
 # --- IMPORTACIÓ ROBUSTA DE MOVIEPY ---
 try:
-    from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips
+    from moviepy.editor import VideoFileClip, ImageClip, concatenate_videoclips
 except (ImportError, ModuleNotFoundError):
     try:
-        from moviepy import VideoFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips
+        from moviepy import VideoFileClip, ImageClip, concatenate_videoclips
     except ImportError:
         print("Error: No s'ha trobat MoviePy.")
 
@@ -24,7 +22,6 @@ BUFFER_ACCESS_TOKEN = os.getenv('BUFFER_ACCESS_TOKEN')
 BUFFER_CHANNEL_ID = os.getenv('BUFFER_CHANNEL_ID')
 GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
-# Variable per al text de la publicació (es pot canviar manualment)
 DEFAULT_CAPTION = "Tonight, V stepped into the crowd, taking in live performances at Vogue World: Hollywood. Known for his own standout fashion moments, he kept it effortlessly stylish in a look worthy of the runway."
 
 DB_FILE = 'processed_videos.json'
@@ -50,99 +47,86 @@ def clean_videos_folder():
                 os.remove(file_path)
         print("Carpeta netejada correctament.")
 
-def make_blurred_background(frame):
-    """Genera un fotograma desenfocat (blur) ultrarràpid per al fons 9:16."""
-    pil_img = Image.fromarray(frame)
-    resampling = getattr(Image, 'Resampling', Image).BILINEAR
-    # Reduir mida per a un efecte blur molt més ràpid i suau
-    small = pil_img.resize((108, 192), resampling)
-    blurred = small.filter(ImageFilter.GaussianBlur(radius=8))
-    large = blurred.resize((1080, 1920), resampling)
-    # Fosquejar lleugerament el fons per fer ressaltar el vídeo central
-    dark_frame = (np.array(large) * 0.65).astype(np.uint8)
-    return dark_frame
+def download_video_file(url, target_path):
+    """Descarrega el vídeo amb capçaleres de navegador i fins a 3 reintents."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*"
+    }
+    for attempt in range(1, 4):
+        try:
+            print(f"Intent {attempt}/3 de descàrrega del vídeo...")
+            res = requests.get(url, headers=headers, timeout=30, stream=True)
+            res.raise_for_status()
+            with open(target_path, "wb") as f:
+                for chunk in res.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print("Descàrrega completada amb èxit.")
+            return True
+        except Exception as e:
+            print(f"⚠️ Error a l'intent {attempt}: {e}")
+            time.sleep(3)
+    return False
 
 def process_video(video_url):
-    """Descarrega el vídeo, el força a 9:16 (1080x1920) amb fons de blur si cal, i afegeix la thumbnail al frame 0."""
-    print("Descarregant vídeo...")
-    res = requests.get(video_url)
+    """Descarrega el vídeo, afegeix la thumbnail al frame 0, el comprimeix i el guarda a videos/out.mp4."""
     temp_path = "temp.mp4"
-    with open(temp_path, "wb") as f:
-        f.write(res.content)
+    
+    if not download_video_file(video_url, temp_path):
+        raise Exception("No s'ha pogut descarregar el vídeo de la CDN d'Instagram després de 3 intents.")
 
-    print("Processant vídeo a format vertical 9:16 (1080x1920)...")
+    print("Processant vídeo a 1080p i afegint la portada al primer frame...")
     clip = VideoFileClip(temp_path)
     
-    target_w, target_h = 1080, 1920
+    target_h = 1080
     w, h = clip.size
-    aspect_ratio = w / h
-    target_aspect = target_w / target_h # ~0.5625
+    target_w = int(w * (target_h / h))
+    if target_w % 2 != 0: target_w -= 1
 
-    # Comprovar si el vídeo NO té format 9:16 (marge de tolerància 0.03)
-    if abs(aspect_ratio - target_aspect) > 0.03:
-        print("El vídeo no és 9:16. Generant fons de blur i centrant el vídeo...")
-        
-        # 1. Crear el fons desenfocat (blur)
-        bg_clip = clip.resized(new_size=(target_w, target_h)) if hasattr(clip, "resized") else clip.resize(new_size=(target_w, target_h))
-        if hasattr(bg_clip, "image_transform"):
-            bg_clip = bg_clip.image_transform(make_blurred_background)
-        else:
-            bg_clip = bg_clip.fl_image(make_blurred_background)
-
-        # 2. Redimensionar el vídeo principal per a que cabiga al centre
-        scale = min(target_w / w, target_h / h)
-        fg_w = int(w * scale)
-        fg_h = int(h * scale)
-        if fg_w % 2 != 0: fg_w -= 1
-        if fg_h % 2 != 0: fg_h -= 1
-
-        fg_clip = clip.resized(new_size=(fg_w, fg_h)) if hasattr(clip, "resized") else clip.resize(new_size=(fg_w, fg_h))
-        
-        # Posicionar al centre
-        if hasattr(fg_clip, "with_position"):
-            fg_clip = fg_clip.with_position(('center', 'center'))
-        else:
-            fg_clip = fg_clip.set_position(('center', 'center'))
-
-        # Superposar vídeo centrat sobre el fons de blur
-        video_916 = CompositeVideoClip([bg_clip, fg_clip], size=(target_w, target_h))
+    if hasattr(clip, "resized"):
+        clip = clip.resized(new_size=(target_w, target_h))
     else:
-        print("El vídeo ja és en format 9:16.")
-        video_916 = clip.resized(new_size=(target_w, target_h)) if hasattr(clip, "resized") else clip.resize(new_size=(target_w, target_h))
+        clip = clip.resize(new_size=(target_w, target_h))
 
-    # Afegeix la thumbnail d'assets/thumbnail.png al primer frame (0.1s)
     thumb_path = os.path.join("assets", "thumbnail.png")
     if os.path.exists(thumb_path):
         img = ImageClip(thumb_path)
         thumb_clip = img.with_duration(0.1) if hasattr(img, "with_duration") else img.set_duration(0.1)
         thumb_clip = thumb_clip.resized(new_size=(target_w, target_h)) if hasattr(thumb_clip, "resized") else thumb_clip.resize(new_size=(target_w, target_h))
-        final_clip = concatenate_videoclips([thumb_clip, video_916])
+        final_clip = concatenate_videoclips([thumb_clip, clip])
     else:
         print("⚠️ Avís: No s'ha trobat assets/thumbnail.png. Es processarà sense portada.")
-        final_clip = video_916
+        final_clip = clip
 
-    # Guardar a la carpeta videos/
     output_path = os.path.join(VIDEOS_DIR, "out.mp4")
+    
+    # EXPORTACIÓ OPTIMITZADA EN MIDA I BITRATE (Màxim ~20-30MB)
     final_clip.write_videofile(
         output_path, 
         codec="libx264", 
         audio_codec="aac",
         audio=True,
+        bitrate="3500k",  # Controla el pes del vídeo per no superar els 50MB de GitHub
         temp_audiofile='temp-audio.m4a',
         remove_temp=True,
-        ffmpeg_params=["-pix_fmt", "yuv420p"]
+        ffmpeg_params=["-pix_fmt", "yuv420p", "-crf", "24"]
     )
     clip.close()
-    video_916.close()
     if os.path.exists(thumb_path):
         final_clip.close()
     if os.path.exists(temp_path):
         os.remove(temp_path)
 
+    # CONTROL DE SEGURETAT DE MIDA PER A GITHUB (MÀXIM 48 MB)
+    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"📦 Mida final del vídeo: {file_size_mb:.2f} MB")
+    if file_size_mb > 48:
+        raise Exception(f"El vídeo generat pesa massa ({file_size_mb:.2f} MB) i supera el límit de GitHub.")
+
     return output_path
 
 def push_to_github_and_get_raw_url(filepath):
-    """Pushea el nou vídeo a GitHub (forçant el fitxer .mp4) i retorna la URL Raw de la branca main."""
+    """Pushea el nou vídeo a GitHub i retorna la URL Raw de la branca main."""
     print("Pusheant el nou vídeo a GitHub...")
     
     subprocess.run(["git", "config", "--local", "user.email", "bot@github.com"], check=True)
@@ -163,7 +147,7 @@ def push_to_github_and_get_raw_url(filepath):
     return raw_url
 
 def publish_to_buffer(video_public_url, caption):
-    """Publica el vídeo DIRECTAMENT a Instagram utilitzant el primer frame com a portada."""
+    """Publica el vídeo directament a Instagram via Buffer."""
     print("Publicant directament a Instagram via Buffer...")
     
     query = """
@@ -192,7 +176,7 @@ def publish_to_buffer(video_public_url, caption):
                     "video": {
                         "url": video_public_url,
                         "metadata": {
-                            "thumbnailOffset": 0  # Frame 0 (thumbnail.png)
+                            "thumbnailOffset": 0
                         }
                     }
                 }
@@ -260,19 +244,22 @@ def main():
             
             if candidates:
                 candidates.sort(key=lambda x: x.get("likesCount", 0), reverse=True)
-                best_video = candidates[0]
                 
-                output_file = process_video(best_video["videoUrl"])
+                for candidate in candidates:
+                    try:
+                        output_file = process_video(candidate["videoUrl"])
+                        processed_ids.append(candidate["id"])
+                        with open(DB_FILE, 'w') as f: json.dump(processed_ids[-500:], f)
+                        
+                        raw_url = push_to_github_and_get_raw_url(output_file)
+                        publish_to_buffer(raw_url, DEFAULT_CAPTION)
+                        video_enviat = True
+                        break
+                    except Exception as e:
+                        print(f"⚠️ Error processant el vídeo {candidate.get('id')}: {e}. Intentant amb el següent candidat...")
                 
-                processed_ids.append(best_video["id"])
-                with open(DB_FILE, 'w') as f: json.dump(processed_ids[-500:], f)
-                
-                raw_url = push_to_github_and_get_raw_url(output_file)
-                
-                publish_to_buffer(raw_url, DEFAULT_CAPTION)
-                
-                video_enviat = True
-                break
+                if video_enviat:
+                    break
             else:
                 print(f"No hi ha res nou a {selected_account}.")
         except Exception as e:
