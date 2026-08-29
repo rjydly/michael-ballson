@@ -1,9 +1,6 @@
 name: Instagram Buffer Bot
 
 on:
-  schedule:
-    # Execució cada 2 hores al minut 17
-    - cron: '17 */2 * * *'
   workflow_dispatch:
 
 permissions:
