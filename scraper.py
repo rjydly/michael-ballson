@@ -2,12 +2,15 @@ import os
 import csv
 import json
 import time
+import requests
 import subprocess
 from datetime import datetime, timezone, timedelta
 from apify_client import ApifyClient
 
 # --- CONFIGURACIÓ ---
 APIFY_TOKEN = os.getenv('APIFY_TOKEN')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
 DB_FILE = 'processed_videos.json'
@@ -32,14 +35,12 @@ def load_backup_csv():
     return rows
 
 def save_backup_csv(rows):
-    """Guarda el CSV ordenant sempre de MÉS VIRAL a MENYS VIRAL per likes."""
     for r in rows:
         try:
             r['likes'] = int(r.get('likes', 0))
         except (ValueError, TypeError):
             r['likes'] = 0
 
-    # Ordenar de més a menys likes
     rows.sort(key=lambda x: x['likes'], reverse=True)
 
     fieldnames = ['link', 'likes', 'status']
@@ -50,7 +51,6 @@ def save_backup_csv(rows):
             writer.writerow(r)
 
 def sync_backups(candidates_for_backup):
-    """Afegeix els candidats amb > 1000 likes al CSV de backup."""
     rows = load_backup_csv()
     existing_links = {r['link'] for r in rows}
 
@@ -59,17 +59,49 @@ def sync_backups(candidates_for_backup):
         likes = c.get('likesCount', 0)
         link = c.get('url') or f"https://www.instagram.com/p/{c.get('code')}/"
         
-        # Filtre: Més de 1000 likes i no existent al CSV
         if likes > 1000 and link and link not in existing_links:
             rows.append({
                 'link': link,
                 'likes': likes,
-                'status': ''  # Pendent (camp buit)
+                'status': ''
             })
             added_count += 1
 
     save_backup_csv(rows)
     print(f"📦 Afegits {added_count} nous vídeos de backup a {BACKUP_CSV}.")
+
+def send_telegram_summary(queue_items):
+    """Envia un resum clar i intuïtiu a Telegram amb els vídeos seleccionats per avui."""
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("⚠️ TELEGRAM_TOKEN o CHAT_ID no configurats. Ometent notificació.")
+        return
+
+    print("📱 Enviant resum de la cua diària a Telegram...")
+    
+    header = f"<b>🚀 CUA DE VÍDEOS D'AVUI ({len(queue_items)} REELS)</b>\n\n"
+    lines = []
+    for item in queue_items:
+        rank = item.get("rank", "")
+        username = item.get("username", "desconegut")
+        likes = item.get("likes", 0)
+        url = item.get("url", "")
+        lines.append(f"<b>#{rank}</b> | <b>@{username}</b> - ❤️ {likes:,} likes\n🔗 {url}\n")
+
+    full_message = header + "\n".join(lines)
+    url_api = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    
+    chunks = [full_message[i:i+4000] for i in range(0, len(full_message), 4000)]
+    for chunk in chunks:
+        try:
+            res = requests.post(url_api, json={
+                "chat_id": CHAT_ID,
+                "text": chunk,
+                "disable_web_page_preview": True,
+                "parse_mode": "HTML"
+            }, timeout=10)
+            res.raise_for_status()
+        except Exception as e:
+            print(f"⚠️ Error enviant missatge a Telegram: {e}")
 
 def push_queue_and_backups():
     print("Pusheant la cua diària i backups a GitHub...")
@@ -79,7 +111,7 @@ def push_queue_and_backups():
     subprocess.run(["git", "add", QUEUE_FILE], check=True)
     subprocess.run(["git", "add", BACKUP_CSV], check=True)
     
-    commit_res = subprocess.run(["git", "commit", "-m", "Actualitzar cua diària i backups [skip ci]"])
+    commit_res = subprocess.run(["git", "commit", "-m", "Actualitzar cua diària (20 vídeos) i backups [skip ci]"])
     if commit_res.returncode == 0:
         subprocess.run(["git", "push"], check=True)
         print("✅ Cua diària i backups actualitzats a GitHub!")
@@ -90,7 +122,7 @@ def main():
         return
 
     client = ApifyClient(APIFY_TOKEN)
-    accounts = load_accounts()[:8]  # OPCIÓ 3: Primers 8 perfils de accounts.csv
+    accounts = load_accounts()[:8]
     
     if not accounts:
         print("Error: No s'han trobat perfils a accounts.csv")
@@ -104,7 +136,7 @@ def main():
 
     fa_dos_dies = datetime.now(timezone.utc) - timedelta(days=2)
 
-    print(f"🔍 Iniciant scrapping diari de {len(accounts)} perfils (9 posts per perfil)...")
+    print(f"🔍 Iniciant scrapping diari de {len(accounts)} perfils...")
     run_input = {
         "directUrls": accounts,
         "resultsType": "posts",
@@ -137,20 +169,31 @@ def main():
                 candidates.append(i)
 
         print(f"🎯 Trobats {len(candidates)} vídeos candidats recents.")
-
-        # Ordenar de més a menys likes
         candidates.sort(key=lambda x: x.get("likesCount", 0), reverse=True)
 
-        # Els 12 primers a la cua del dia (today_queue.json)
-        today_queue = candidates[:12]
+        # GENERAR ESTRUCTURA CLARA A TODAY_QUEUE.JSON (TOP 20)
+        today_queue = []
+        for idx, c in enumerate(candidates[:20], 1):
+            link = c.get('url') or f"https://www.instagram.com/p/{c.get('code')}/"
+            today_queue.append({
+                "rank": idx,
+                "id": c.get("id"),
+                "username": c.get("ownerUsername") or "desconegut",
+                "likes": c.get("likesCount", 0),
+                "url": link,
+                "videoUrl": c.get("videoUrl")
+            })
         
-        # La resta (a partir del 13è) al backup si tenen > 1000 likes
-        candidates_for_backup = candidates[12:]
+        candidates_for_backup = candidates[20:]
 
         # Desar today_queue.json
         with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
             json.dump(today_queue, f, indent=2)
         print(f"📋 Guardats els {len(today_queue)} millors vídeos a {QUEUE_FILE}.")
+
+        # Enviar resum a Telegram
+        if today_queue:
+            send_telegram_summary(today_queue)
 
         # Sincronitzar la resta amb backup_reels.csv
         if candidates_for_backup:
