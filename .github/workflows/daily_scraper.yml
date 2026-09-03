@@ -26,5 +26,7 @@ jobs:
       - name: Run Scraper
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python scraper.py
