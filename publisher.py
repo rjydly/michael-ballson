@@ -71,6 +71,8 @@ def mark_link_status_in_csv(link, status):
     save_backup_csv(rows)
 
 def download_video_file(url, target_path):
+    if not url:
+        return False
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "*/*"
@@ -99,7 +101,6 @@ def download_reel_with_ytdlp(reel_url, target_path="temp.mp4"):
     return target_path
 
 def fit_clip_to_1080x1920(clip):
-    """Ajusta qualsevol vídeo o imatge a un llenç vertical estricte de 1080x1920 amb fons negre."""
     target_w, target_h = 1080, 1920
     w, h = clip.size
     
@@ -214,7 +215,7 @@ def process_from_backup():
         return False
 
     consecutive_failures = 0
-    pause_count = 0  # Comptador de quantes pauses de 5 minuts hem fet
+    pause_count = 0
 
     for row in pending_rows:
         link = row['link']
@@ -234,16 +235,13 @@ def process_from_backup():
             mark_link_status_in_csv(link, 'failed')
             consecutive_failures += 1
 
-            # TALL DE SEGURETAT: Si portem 2 fallades consecutives
             if consecutive_failures >= 2:
                 if pause_count < 2:
                     pause_count += 1
-                    print(f"⚠️ Detectades 2 fallades consecutives de descàrrega/processament.")
-                    print(f"⏳ Esperant 5 minuts abans de provar el següent (Pausa {pause_count}/2)...")
-                    time.sleep(300)  # Pausa de 5 minuts (300s)
-                    consecutive_failures = 0  # Reiniciem el comptador per donar una nova oportunitat
+                    print(f"⚠️ Detectades 2 fallades consecutives. Esperant 5 minuts (Pausa {pause_count}/2)...")
+                    time.sleep(300)
+                    consecutive_failures = 0
                 else:
-                    print("❌ El sistema segueix fallant després de 2 pauses de 5 minuts.")
                     print("🛑 S'abandona el procés per no marcar la resta del CSV com a 'failed'.")
                     return False
 
@@ -271,7 +269,9 @@ def main():
             if video_id in processed_ids:
                 continue
 
-            print(f"🎬 Publicant vídeo de la cua diària: @{candidate.get('ownerUsername')} ({candidate.get('likesCount')} likes)")
+            username = candidate.get("username") or candidate.get("ownerUsername") or "desconegut"
+            likes = candidate.get("likes") if "likes" in candidate else candidate.get("likesCount", 0)
+            print(f"🎬 Publicant vídeo de la cua diària: @{username} ({likes} likes)")
             
             try:
                 temp_path = "temp.mp4"
