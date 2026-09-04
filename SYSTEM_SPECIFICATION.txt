@@ -2,7 +2,7 @@
 SYSTEM ARCHITECTURE & TECHNICAL SPECIFICATION: AUTOMATED INSTAGRAM REELS BOT
 ================================================================================
 Target Repository: rjydly/michael-ballson
-Author / Architecture Date: August 2026
+Author / Architecture Date: September 2026
 Purpose: Fully automated Instagram Reels scraping, processing, and instant publishing.
 
 --------------------------------------------------------------------------------
@@ -10,15 +10,17 @@ Purpose: Fully automated Instagram Reels scraping, processing, and instant publi
 --------------------------------------------------------------------------------
 The system is divided into TWO decoupled, asynchronous subsystems:
 1. Daily Scraper Subsystem (`scraper.py` / `daily_scraper.yml`): Runs 1x/day.
-2. Hourly Publisher Subsystem (`publisher.py` / `hourly_publisher.yml`): Runs 12x/day (every 2h).
+2. Hourly Publisher Subsystem (`publisher.py` / `hourly_publisher.yml`): Runs 20x-24x/day (Every 1h).
 
 CRITICAL TRIGGER SPECIFICATION:
-Native GitHub Actions `on.schedule` (cron) IS NOT USED. GitHub's native scheduler suffers 
-from severe queue delays (30m to 11h), dormancy bugs on fresh pushes, and shared runner throttling.
+Native GitHub Actions `on.schedule` (cron) IS NOT USED due to unpredictable queue delays (30m to 11h),
+dormancy bugs, and shared runner throttling.
 Instead, BOTH workflows use `on: workflow_dispatch` and are triggered externally via 
 REST API calls from Cron-job.org:
-- Daily Scraper Webhook: POST https://api.github.com/repos/rjydly/michael-ballson/actions/workflows/daily_scraper.yml/dispatches
-- Hourly Publisher Webhook: POST https://api.github.com/repos/rjydly/michael-ballson/actions/workflows/hourly_publisher.yml/dispatches
+- Daily Scraper Webhook (1x/day at 01:00 UTC):
+  POST https://api.github.com/repos/rjydly/michael-ballson/actions/workflows/daily_scraper.yml/dispatches
+- Hourly Publisher Webhook (20-24x/day, Every 1h):
+  POST https://api.github.com/repos/rjydly/michael-ballson/actions/workflows/hourly_publisher.yml/dispatches
 Headers required: Authorization: Bearer <GITHUB_PAT>, Accept: application/vnd.github+json, User-Agent: CronJobBot.
 Body: {"ref": "main"}.
 
@@ -26,13 +28,14 @@ Body: {"ref": "main"}.
 2. DAILY SCRAPER SUBSYSTEM (`scraper.py`)
 --------------------------------------------------------------------------------
 - Frequency: 1x per day.
+- Target Volume: 20 posts published per day target.
 - Account Targeting: Batches the top 8 Instagram profiles from `accounts.csv`.
 - API Provider: Apify Actor `apify/instagram-api-scraper`.
 
 COST OPTIMIZATION LAWS:
 A) Batched Request: `directUrls` takes all 8 profile URLs in a SINGLE Actor call. 
    This limits the fixed "Actor Start" fee ($0.001) to exactly 1 per day ($0.03/month).
-B) Omission of Date Filter: The input payload DO NOT pass `onlyPostsNewerThan`. 
+B) Omission of Date Filter: The input payload DOES NOT pass `onlyPostsNewerThan`. 
    Passing date filters to Apify triggers a $1.30 / 1,000 results Add-on surcharge.
    Instead, `resultsLimit: 9` fetches the 9 latest posts per profile (72 posts total).
    Filtering by date (newer than 2 days) is executed locally in Python at $0.00 cost.
@@ -42,19 +45,23 @@ SCRAPING & QUEUE LOGIC:
 1. Local Filtering: Post must be a Video, post ID must not exist in `processed_videos.json`,
    and timestamp must be >= `now() - 2 days` (parsed via ISO 8601 or UNIX timestamp).
 2. Sorting: Candidates are sorted descending by `likesCount`.
-3. Daily Queue Generation: Top 12 candidates are written to `today_queue.json`.
-4. Backup Persistence: Candidates 13+ with `likesCount > 1000` are synced to `backup_reels.csv`.
-   `backup_reels.csv` is maintained in strict descending order of `likesCount`.
-5. Git State Persistence: `today_queue.json` and `backup_reels.csv` are committed and pushed.
+3. Daily Queue Generation (TOP 20): Top 20 candidates are formatted into `today_queue.json`
+   with an intuitive schema: `{"rank": idx, "id": "...", "username": "...", "likes": ..., "url": "...", "videoUrl": "..."}`.
+4. Telegram Notification: Generates and posts a rich HTML-formatted summary message to Telegram (`TELEGRAM_TOKEN`, `CHAT_ID`)
+   listing all 20 queued items (#rank, @username, likes, and permanent URL). Uses `parse_mode="HTML"` to prevent
+   markdown escape syntax errors with underscores in Instagram usernames. Chunked at 4000 characters.
+5. Backup Persistence: Candidates 21+ with `likesCount > 1000` are synced to `backup_reels.csv` (`link,likes,status`).
+   `backup_reels.csv` is maintained in strict descending order of `likes`.
+6. Git State Persistence: `today_queue.json` and `backup_reels.csv` are committed and pushed.
 
 --------------------------------------------------------------------------------
 3. HOURLY PUBLISHER SUBSYSTEM (`publisher.py`)
 --------------------------------------------------------------------------------
-- Frequency: 12x per day (every 2 hours).
+- Frequency: Every 1 hour (20x-24x per day).
 - Primary Queue Strategy (`today_queue.json`):
   1. Reads `today_queue.json`. Pops candidate 0.
   2. Downloads video. Primary attempt uses direct CDN `videoUrl` with custom Chrome `User-Agent`
-     and 3 retries. Fallback attempt uses `yt-dlp` on candidate permanent URL (`https://instagram.com/p/...`).
+     and 3 retries. Fallback attempt uses `yt-dlp` on candidate permanent URL (`url`).
   3. On success: Processes video, records post ID in `processed_videos.json`, saves `today_queue.json`,
      pushes state to GitHub, publishes to Buffer.
   4. If `today_queue.json` candidate fails completely: pops it and tries candidate 1.
@@ -80,7 +87,7 @@ Circuit Breaker Logic in `process_from_backup()`:
 --------------------------------------------------------------------------------
 4. VIDEO MEDIA PROCESSING & NORMALIZATION (MoviePy & FFmpeg)
 --------------------------------------------------------------------------------
-1080x1920 CANVAS NORMALIZATION (STRICT REEL ASPECT RATIO 9:16):
+STRICT 1080x1920 CANVAS NORMALIZATION (REEL ASPECT RATIO 9:16 WITH BLACK BACKGROUND):
 Instagram Reels require vertical 9:16 geometry. Input videos can be 1:1, 16:9, or arbitrary sizes.
 Function `fit_clip_to_1080x1920(clip)` enforces a strict 1080x1920 canvas:
 1. Calculates aspect ratio scaling factor: `scale = min(1080 / w, 1920 / h)`.
@@ -142,19 +149,14 @@ Note: `metadata.instagram.type: "reel"` is MANDATORY; missing it causes Buffer A
 "Invalid post: Instagram posts require a type (post, story, or reel)".
 
 --------------------------------------------------------------------------------
-6. DATA PERSISTENCE & CSV SPECIFICATION
+6. ENVIRONMENT SECRETS REQUIRED
 --------------------------------------------------------------------------------
-`backup_reels.csv` Schema:
-- Columns: `link,likes,status`
-- `status` values:
-  - `""` (Empty string): Pending backup item.
-  - `"done"`: Successfully processed and posted.
-  - `"failed"`: Download or processing failed permanently.
-- Ordering Rule: CSV rows MUST ALWAYS be saved sorted descending by `likes` integer.
-
-`processed_videos.json` Schema:
-- JSON Array of strings (Instagram Post IDs).
-- Maintained at max 500 items via slice `processed_ids[-500:]`.
+- `APIFY_TOKEN`: Apify API Token.
+- `BUFFER_ACCESS_TOKEN`: Buffer Bearer Token.
+- `BUFFER_CHANNEL_ID`: Instagram Channel ID in Buffer.
+- `TELEGRAM_TOKEN`: Telegram Bot API Token.
+- `CHAT_ID`: Telegram Chat / Channel ID.
+- `GITHUB_REPOSITORY`: Provided automatically by GitHub Actions runner (`${{ github.repository }}`).
 
 --------------------------------------------------------------------------------
 7. DEPENDENCIES (`requirements.txt`)
