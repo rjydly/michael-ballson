@@ -2,3 +2,5 @@ apify-client==1.8.1
 moviepy==2.1.1
 requests==2.32.3
 yt-dlp
+google-genai==1.2.0
+pillow==10.4.0
