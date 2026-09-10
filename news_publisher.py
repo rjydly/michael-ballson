@@ -391,14 +391,19 @@ def publish_to_facebook(image_public_url, caption):
       }
     }
     """
-    # A Facebook no s'han d'enviar metadades d'Instagram
+    # Fix: Buffer exigeix el camp metadata.facebook.type = "post"
     variables = {
         "input": {
             "text": caption,
             "channelId": BUFFER_FB_CHANNEL_ID,
             "schedulingType": "automatic",
             "mode": "shareNow",
-            "assets": [{"image": {"url": image_public_url}}]
+            "assets": [{"image": {"url": image_public_url}}],
+            "metadata": {
+                "facebook": {
+                    "type": "post"
+                }
+            }
         }
     }
     headers = {"Authorization": f"Bearer {BUFFER_ACCESS_TOKEN}", "Content-Type": "application/json"}
