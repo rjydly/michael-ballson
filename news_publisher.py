@@ -2,6 +2,7 @@ import os
 import re
 import json
 import html
+import time
 import requests
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
@@ -68,13 +69,25 @@ def generate_satirical_news():
     - "caption": Full caption text including the satirical joke breakdown, the satire disclaimer, and hashtags.
     """
 
-    res = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json")
-    )
-    data = json.loads(res.text)
-    return data["headline"], data["search_query"], data["caption"]
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"🤖 Connectant amb Gemini (intent {attempt}/{max_attempts})...")
+            res = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
+            )
+            data = json.loads(res.text)
+            return data["headline"], data["search_query"], data["caption"]
+        except Exception as e:
+            print(f"⚠️ Error amb Gemini a l'intent {attempt}: {e}")
+            if attempt < max_attempts:
+                print("⏳ El model té alta demanda (503). Esperant 60 segons abans de reintentar...")
+                time.sleep(60)
+            else:
+                print("🛑 S'han esgotat els 3 intents amb Gemini. S'abandona el procés.")
+                raise e
 
 
 def download_pexels_image(query):
@@ -172,8 +185,6 @@ def render_news_image(stock_path, headline_raw):
     
     bottom_margin = 120  # Espai per a "READ THE CAPTION"
     text_start_y = CANVAS_H - bottom_margin - total_text_h
-    
-    # Més espai vertical per acollir el logo de 110px sense tocar el text
     separator_y = text_start_y - 100
 
     # 3. Generar degradat fosc (comença al 28% superior)
@@ -197,12 +208,10 @@ def render_news_image(stock_path, headline_raw):
         try:
             logo_img = Image.open(LOGO_PATH).convert("RGBA")
             
-            # --- MIDA DEL LOGO ENCARA MÉS GRAN ---
             target_h = 110
             aspect = logo_img.width / logo_img.height
             target_w = int(target_h * aspect)
             
-            # Límit màxim ampliat per a logos horitzontals
             if target_w > 360:
                 target_w = 360
                 target_h = int(target_w / aspect)
@@ -212,7 +221,6 @@ def render_news_image(stock_path, headline_raw):
             logo_x = (CANVAS_W - target_w) // 2
             logo_y = separator_y - (target_h // 2)
 
-            # Línies horitzontals (gruix 3px per acompanyar el logo gran)
             line_padding = 30
             draw.line([(side_margin, separator_y), (logo_x - line_padding, separator_y)], fill=(210, 210, 210, 220), width=3)
             draw.line([(logo_x + target_w + line_padding, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(210, 210, 210, 220), width=3)
