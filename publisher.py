@@ -193,7 +193,7 @@ def publish_to_buffer(video_public_url, caption):
             "schedulingType": "automatic",
             "mode": "shareNow",
             "assets": [{"video": {"url": video_public_url, "metadata": {"thumbnailOffset": 0}}}],
-            "metadata": {"instagram": {"type": "reel", "shouldShareToFeed": True}}
+            "metadata": {"instagram": {"type": "reel", "shouldShareToFeed": False}}
         }
     }
     headers = {"Authorization": f"Bearer {BUFFER_ACCESS_TOKEN}", "Content-Type": "application/json"}
