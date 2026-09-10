@@ -35,24 +35,32 @@ def ensure_font_exists():
 
 def generate_satirical_news():
     client = genai.Client(api_key=GEMINI_API_KEY)
+    
     prompt = """
-    You are a head writer for a viral satirical media outlet (like The Onion or Reductress) focused on POP CULTURE, EVERYDAY LIFE, and RELATABLE MODERN STRUGGLES that could happen to anyone.
+    You are the legendary Editor-in-Chief of a viral satirical media brand (in the spirit of The Onion, Reductress, and top-tier internet meme satire).
     
-    Topics to cover:
-    - Daily adult life, burnout, procrastination, bad life decisions.
-    - Dating apps, awkward social interactions, friendship drama.
-    - Pop culture trends, celebrity absurdities, shopping habits, grocery store anxiety.
-    - Modern workplace relatable humor, working from home dilemmas, caffeine addiction.
+    YOUR COMIC FORMULA:
+    Take an insanely petty, embarrassing, or hyper-relatable everyday human behavior and report on it with the DEADPAN SERIOUSNESS of breaking Pulitzer-winning news.
     
-    CRITICAL REQUIREMENTS:
-    - Everything MUST be written in 100% ENGLISH.
-    - Headline must be short, punchy, dramatic, and humorous (10-14 words max).
-    - In the headline, mark 2 to 3 of the most hilarious, punchy keywords with double asterisks **like this** so they will be highlighted in yellow.
+    STUDY THESE EXCELLENT HEADLINE EXAMPLES:
+    - Example 1: "**MAN** ACCIDENTALLY CLOSES 48 OPEN BROWSER TABS HE WAS '**DEFINITELY GOING TO READ** LATER'"
+    - Example 2: "**WOMAN** BUYS $8 ICED MATCHA LATTE TO MOTIVATE HERSELF TO WORK FOR **EXACTLY 6 MINUTES**"
+    - Example 3: "**SCIENTISTS CONFIRM** 90% OF YOUR TIREDNESS WOULD DISAPPEAR IF YOU JUST **DRANK SOME DAMN WATER**"
+    - Example 4: "**LOCAL MAN** REWARDS HIMSELF FOR COMPLETING ONE TINY TASK WITH A **4-HOUR COMA NAP**"
+    - Example 5: "**WOMAN** REHEARSES ENTIRE ARGUMENT IN SHOWER AGAINST SOMEONE WHO HAS **NO IDEA SHE IS ANGRY**"
+    - Example 6: "**COUPLE** REACHES DANGEROUS LEVEL OF COMFORT WHERE THEY ONLY COMMUNICATE IN **UNINTELLIGIBLE GRUNTS**"
+    
+    RULES:
+    1. Everything MUST be in ENGLISH.
+    2. Headline must be punchy (10 to 14 words max).
+    3. Put double asterisks **around 2 to 3 punchy keywords** that should be colored bright yellow.
+    4. The caption MUST expand on the absurd premise with 2 hilarious, deadpan journalistic paragraphs.
+    5. CRITICAL: At the very end of the caption, ALWAYS include an explicit, funny disclaimer stating that this is SATIRE (e.g. "(Disclaimer: This is satire. Please do not cite us in court.)" or "(Note: This is satire / fake news, but painfully real.)") followed by 4-5 relevant hashtags.
     
     Respond ONLY with valid JSON with these exact keys:
-    - "headline": Uppercase relatable satirical headline with **highlighted** words (e.g. "**LOCAL MAN** SPENDS 45 MINUTES CHOOSING MOVIE, FALLS ASLEEP IN **FIRST 3 MINUTES**" or "**WOMAN** CANCELS ALL PLANS TO **STARE AT CEILING** FOR FREE")
-    - "search_query": Simple English photo search query for Pexels representing real everyday humans or realistic scenes (e.g. "tired person couch phone", "awkward couple coffee", "person grocery store confused", "exhausted woman bed", "stressed professional desk")
-    - "caption": Engaging, funny Instagram caption expanding on the joke in 2 quick witty paragraphs, ending with 4-5 relatable hashtags.
+    - "headline": Uppercase headline string with **highlighted** words.
+    - "search_query": Simple English photo search query for Pexels representing realistic everyday humans/situations (e.g. "stressed woman kitchen counter", "tired man in bed phone", "couple sitting sofa distant", "confused customer coffee shop").
+    - "caption": Full caption text including the satirical joke breakdown, the satire disclaimer, and hashtags.
     """
 
     res = client.models.generate_content(
@@ -161,15 +169,13 @@ def render_news_image(stock_path, headline_raw):
     text_start_y = CANVAS_H - bottom_margin - total_text_h
     separator_y = text_start_y - 80
 
-    # 3. Generar degradat fosc (MÉS ALT I PROFUND)
+    # 3. Generar degradat fosc (comença al 28% superior)
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
 
-    # El degradat comença molt més amunt (al voltant del 28% de la imatge)
     gradient_top = int(CANVAS_H * 0.28)
     for y in range(gradient_top, CANVAS_H):
         progress = (y - gradient_top) / (CANVAS_H - gradient_top)
-        # Corba d'enfosquiment progressiva que arriba al negre absolut abans del text
         alpha = int(255 * (progress ** 1.15))
         draw_g.line([(0, y), (CANVAS_W, y)], fill=(0, 0, 0, min(255, alpha)))
 
@@ -276,7 +282,7 @@ def send_preview_to_telegram(image_path, caption):
 
 
 def main():
-    print("1. Generant titular satíric en anglès amb Gemini (Pop culture / Everyday life)...")
+    print("1. Generant titular satíric d'alt impacte amb Gemini...")
     headline, keyword, caption = generate_satirical_news()
     print(f"👉 Headline: {headline}")
     print(f"👉 Keyword Pexels: {keyword}")
@@ -284,7 +290,7 @@ def main():
     print("2. Descarregant foto d'estoc de Pexels...")
     stock_img = download_pexels_image(keyword)
 
-    print("3. Processant disseny (Anton, Groc/Blanc, Blackfade ampliat)...")
+    print("3. Processant disseny...")
     output_img = render_news_image(stock_img, headline)
 
     print("4. Enviant preview a Telegram...")
