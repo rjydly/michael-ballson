@@ -13,7 +13,7 @@ PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-BRAND_NAME = "HOMER NEWS"
+BRAND_NAME = "EL TEU COMPTE"
 OUTPUT_IMAGE = "preview_news.jpg"
 
 
@@ -29,7 +29,7 @@ def generate_satirical_news():
     """
 
     res = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.6-flash",
         contents=prompt,
         config=types.GenerateContentConfig(response_mime_type="application/json")
     )
@@ -122,7 +122,7 @@ def send_preview_to_telegram(image_path, caption):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     caption_escaped = html.escape(caption)
     caption_text = f"📰 <b>NOVA NOTÍCIA GENERADA (PREVIEW)</b>\n\n{caption_escaped}"
-    
+
     if len(caption_text) > 1024:
         caption_text = caption_text[:1020] + "..."
 
