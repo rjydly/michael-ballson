@@ -3,28 +3,46 @@ import re
 import json
 import html
 import time
+import subprocess
 import requests
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
 from google.genai import types
 
-# --- CONFIGURACIÓ ---
+# ==============================================================================
+# CONFIGURACIÓ PRINCIPAL
+# ==============================================================================
+# True  -> Només genera la imatge i l'envia a Telegram (sense publicar a xarxes).
+# False -> Publica a Instagram via Buffer I TAMBÉ envia còpia a Telegram.
+MODE_PROVA = False
+
+ACCOUNT_NAME = "@homer.news"
+IMAGES_DIR = "images"
+OUTPUT_IMAGE = os.path.join(IMAGES_DIR, "news_post.jpg")
+LOGO_PATH = os.path.join("assets", "logo.png")
+FONT_PATH = os.path.join("assets", "Anton-Regular.ttf")
+
+# Variables d'entorn
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+BUFFER_ACCESS_TOKEN = os.getenv("BUFFER_ACCESS_TOKEN")
+BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
 
-ACCOUNT_NAME = "@homer.news"
-LOGO_PATH = os.path.join("assets", "logo.png")
-FONT_PATH = os.path.join("assets", "Anton-Regular.ttf")
-OUTPUT_IMAGE = "preview_news.jpg"
+
+def ensure_workspace():
+    """Assegura les carpetes de treball necessàries."""
+    if not os.path.exists("assets"):
+        os.makedirs("assets")
+    if not os.path.exists(IMAGES_DIR):
+        os.makedirs(IMAGES_DIR)
 
 
 def ensure_font_exists():
-    """Assegura que la tipografia Anton existeixi; si no, la descarrega de Google Fonts."""
-    if not os.path.exists("assets"):
-        os.makedirs("assets")
-
+    """Assegura que la font Anton existeixi; si no, la descarrega."""
+    ensure_workspace()
     if not os.path.exists(FONT_PATH):
         print("⬇️ Descarregant font Anton de Google Fonts...")
         font_url = "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf"
@@ -83,7 +101,7 @@ def generate_satirical_news():
         except Exception as e:
             print(f"⚠️ Error amb Gemini a l'intent {attempt}: {e}")
             if attempt < max_attempts:
-                print("⏳ El model té alta demanda (503). Esperant 60 segons abans de reintentar...")
+                print("⏳ Esperant 60 segons abans de reintentar...")
                 time.sleep(60)
             else:
                 print("🛑 S'han esgotat els 3 intents amb Gemini. S'abandona el procés.")
@@ -106,7 +124,6 @@ def download_pexels_image(query):
 
 
 def parse_headline_words(headline_text):
-    """Extreu paraules i detecta si estan marcades amb ** per pintar-les de groc."""
     tokens = re.split(r'(\*\*.*?\*\*)', headline_text)
     parsed = []
     for token in tokens:
@@ -124,7 +141,6 @@ def parse_headline_words(headline_text):
 
 
 def wrap_words_to_lines(parsed_words, font, max_width, draw):
-    """Agrupa paraules en línies sense superar l'amplada màxima."""
     space_w = draw.textbbox((0, 0), " ", font=font)[2]
     lines = []
     current_line = []
@@ -174,20 +190,20 @@ def render_news_image(stock_path, headline_raw):
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
 
     temp_draw = ImageDraw.Draw(img)
-    max_text_w = CANVAS_W - 140  # Marges laterals de 70px
+    max_text_w = CANVAS_W - 140
 
     parsed_words = parse_headline_words(headline_raw)
     lines = wrap_words_to_lines(parsed_words, font_headline, max_text_w, temp_draw)
 
-    # 2. Càlcul dinàmic de mides
+    # 2. Mides i coordenades
     line_h = int(font_size * 1.12)
     total_text_h = len(lines) * line_h
     
-    bottom_margin = 120  # Espai per a "READ THE CAPTION"
+    bottom_margin = 120
     text_start_y = CANVAS_H - bottom_margin - total_text_h
     separator_y = text_start_y - 100
 
-    # 3. Generar degradat fosc (comença al 28% superior)
+    # 3. Degradat fosc
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
 
@@ -200,14 +216,13 @@ def render_news_image(stock_path, headline_raw):
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
     draw = ImageDraw.Draw(final_img)
 
-    # 4. Dibuixar la línia amb el logo (AMPLIAT A 110px D'ALÇADA)
+    # 4. Línia amb el logo
     side_margin = 60
     logo_drawn = False
 
     if os.path.exists(LOGO_PATH):
         try:
             logo_img = Image.open(LOGO_PATH).convert("RGBA")
-            
             target_h = 110
             aspect = logo_img.width / logo_img.height
             target_w = int(target_h * aspect)
@@ -228,7 +243,7 @@ def render_news_image(stock_path, headline_raw):
             final_img.alpha_composite(logo_resized, (logo_x, logo_y))
             logo_drawn = True
         except Exception as e:
-            print(f"⚠️ Avís: No s'ha pogut carregar el logo ({e}), usant text de contingència.")
+            print(f"⚠️ Avís amb el logo: {e}")
 
     if not logo_drawn:
         fallback_txt = ACCOUNT_NAME.upper()
@@ -242,10 +257,9 @@ def render_news_image(stock_path, headline_raw):
         draw.line([(txt_x + txt_w + 25, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(210, 210, 210, 220), width=3)
         draw.text((txt_x, txt_y), fallback_txt, font=font_fallback_logo, fill=(230, 230, 230))
 
-    # 5. Dibuixar el titular paraula a paraula (Blanc i Groc)
+    # 5. Titular
     space_w = draw.textbbox((0, 0), " ", font=font_headline)[2]
     current_y = text_start_y
-
     COLOR_WHITE = (255, 255, 255)
     COLOR_YELLOW = (255, 230, 0)
 
@@ -261,7 +275,7 @@ def render_news_image(stock_path, headline_raw):
 
         current_y += line_h
 
-    # 6. Peu de pàgina: READ THE CAPTION
+    # 6. Peu de pàgina
     footer_text = "READ THE CAPTION"
     fb_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
     fb_w = fb_bbox[2] - fb_bbox[0]
@@ -275,13 +289,16 @@ def render_news_image(stock_path, headline_raw):
     return OUTPUT_IMAGE
 
 
-def send_preview_to_telegram(image_path, caption):
+def send_preview_to_telegram(image_path, caption, is_published=False):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        raise Exception("Falten les variables TELEGRAM_TOKEN o CHAT_ID.")
+        print("⚠️ No s'han configurat TELEGRAM_TOKEN o CHAT_ID.")
+        return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     caption_escaped = html.escape(caption)
-    caption_text = f"📰 <b>NOVA NOTÍCIA (@homer.news)</b>\n\n{caption_escaped}"
+    
+    prefix = "🚀 <b>PUBLICAT A INSTAGRAM (@homer.news)</b>" if is_published else "🧪 <b>PREVIEW (MODE PROVA)</b>"
+    caption_text = f"{prefix}\n\n{caption_escaped}"
 
     if len(caption_text) > 1024:
         caption_text = caption_text[:1020] + "..."
@@ -296,10 +313,76 @@ def send_preview_to_telegram(image_path, caption):
         res = requests.post(url, data=payload, files=files, timeout=30)
         res.raise_for_status()
 
-    print("📱 Disseny enviat correctament a Telegram!")
+    print("📱 Notificació enviada a Telegram!")
+
+
+def push_image_to_github(filepath):
+    """Fa push de la imatge generada al repositori per tenir una URL pública per a Buffer."""
+    print("🌐 Pujant imatge a GitHub per a l'enllaç públic...")
+    subprocess.run(["git", "config", "--local", "user.email", "bot@github.com"], check=True)
+    subprocess.run(["git", "config", "--local", "user.name", "NewsBot"], check=True)
+    
+    subprocess.run(["git", "add", "-f", filepath], check=True)
+    commit_res = subprocess.run(["git", "commit", "-m", "Nova imatge de notícia [skip ci]"])
+    if commit_res.returncode == 0:
+        subprocess.run(["git", "push"], check=True)
+        time.sleep(5)
+    
+    filename = os.path.basename(filepath)
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/{IMAGES_DIR}/{filename}"
+    print(f"🔗 URL pública de la imatge: {raw_url}")
+    return raw_url
+
+
+def publish_image_to_buffer(image_public_url, caption):
+    """Envia la imatge a Instagram Feed a través de la GraphQL API de Buffer."""
+    print("🚀 Publicant la notícia a Instagram via Buffer...")
+    query = """
+    mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess { post { id } }
+        ... on MutationError { message }
+      }
+    }
+    """
+    variables = {
+        "input": {
+            "text": caption,
+            "channelId": BUFFER_CHANNEL_ID,
+            "schedulingType": "automatic",
+            "mode": "shareNow",
+            "assets": [
+                {
+                    "image": {
+                        "url": image_public_url
+                    }
+                }
+            ],
+            "metadata": {
+                "instagram": {
+                    "type": "post"
+                }
+            }
+        }
+    }
+    headers = {
+        "Authorization": f"Bearer {BUFFER_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    res = requests.post("https://api.buffer.com", json={"query": query, "variables": variables}, headers=headers).json()
+    
+    if "errors" in res:
+        raise Exception(f"Error GraphQL Buffer: {res['errors']}")
+    post_data = res.get("data", {}).get("createPost", {})
+    if "message" in post_data:
+        raise Exception(f"Error Buffer: {post_data['message']}")
+
+    print("🎉 Notícia publicada amb èxit a Instagram!")
 
 
 def main():
+    ensure_workspace()
+
     print("1. Generant titular per a audiència Europa / Nord-amèrica amb Gemini...")
     headline, keyword, caption = generate_satirical_news()
     print(f"👉 Headline: {headline}")
@@ -311,11 +394,14 @@ def main():
     print("3. Processant disseny...")
     output_img = render_news_image(stock_img, headline)
 
-    print("4. Enviant preview a Telegram...")
-    send_preview_to_telegram(output_img, caption)
-
-    if os.path.exists(output_img):
-        os.remove(output_img)
+    if MODE_PROVA:
+        print("\n🧪 MODE_PROVA = True. No es publica a Instagram, només s'envia a Telegram.")
+        send_preview_to_telegram(output_img, caption, is_published=False)
+    else:
+        print("\n🚀 MODE_PROVA = False. Iniciant publicació a Instagram...")
+        raw_url = push_image_to_github(output_img)
+        publish_image_to_buffer(raw_url, caption)
+        send_preview_to_telegram(output_img, caption, is_published=True)
 
 
 if __name__ == "__main__":
