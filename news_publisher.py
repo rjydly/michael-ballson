@@ -12,8 +12,8 @@ from google.genai import types
 # ==============================================================================
 # CONFIGURACIÓ PRINCIPAL
 # ==============================================================================
-# True  -> Només genera la imatge i l'envia a Telegram (sense publicar a xarxes).
-# False -> Publica a Instagram via Buffer I TAMBÉ envia còpia a Telegram.
+# True  -> Només genera la imatge i l'envia a Telegram (mode test).
+# False -> Publica a Instagram + Facebook via Buffer i envia còpia a Telegram.
 MODE_PROVA = False
 
 ACCOUNT_NAME = "@homer.news"
@@ -28,7 +28,8 @@ PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUFFER_ACCESS_TOKEN = os.getenv("BUFFER_ACCESS_TOKEN")
-BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
+BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")          # Instagram
+BUFFER_FB_CHANNEL_ID = os.getenv("BUFFER_FB_CHANNEL_ID")    # Facebook Page
 GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
 
 
@@ -297,7 +298,7 @@ def send_preview_to_telegram(image_path, caption, is_published=False):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     caption_escaped = html.escape(caption)
     
-    prefix = "🚀 <b>PUBLICAT A INSTAGRAM (@homer.news)</b>" if is_published else "🧪 <b>PREVIEW (MODE PROVA)</b>"
+    prefix = "🚀 <b>PUBLICAT A XARXES (@homer.news)</b>" if is_published else "🧪 <b>PREVIEW (MODE PROVA)</b>"
     caption_text = f"{prefix}\n\n{caption_escaped}"
 
     if len(caption_text) > 1024:
@@ -334,9 +335,13 @@ def push_image_to_github(filepath):
     return raw_url
 
 
-def publish_image_to_buffer(image_public_url, caption):
-    """Envia la imatge a Instagram Feed a través de la GraphQL API de Buffer."""
-    print("🚀 Publicant la notícia a Instagram via Buffer...")
+def publish_to_instagram(image_public_url, caption):
+    """Publica al feed d'Instagram via Buffer."""
+    if not BUFFER_CHANNEL_ID:
+        print("ℹ️ BUFFER_CHANNEL_ID no definit. Ometent Instagram.")
+        return
+
+    print("🚀 Publicant a Instagram...")
     query = """
     mutation CreatePost($input: CreatePostInput!) {
       createPost(input: $input) {
@@ -345,20 +350,13 @@ def publish_image_to_buffer(image_public_url, caption):
       }
     }
     """
-    # Fix: Buffer exigeix shouldShareToFeed: True també a les imatges de tipus 'post'
     variables = {
         "input": {
             "text": caption,
             "channelId": BUFFER_CHANNEL_ID,
             "schedulingType": "automatic",
             "mode": "shareNow",
-            "assets": [
-                {
-                    "image": {
-                        "url": image_public_url
-                    }
-                }
-            ],
+            "assets": [{"image": {"url": image_public_url}}],
             "metadata": {
                 "instagram": {
                     "type": "post",
@@ -367,19 +365,51 @@ def publish_image_to_buffer(image_public_url, caption):
             }
         }
     }
-    headers = {
-        "Authorization": f"Bearer {BUFFER_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {BUFFER_ACCESS_TOKEN}", "Content-Type": "application/json"}
     res = requests.post("https://api.buffer.com", json={"query": query, "variables": variables}, headers=headers).json()
     
     if "errors" in res:
-        raise Exception(f"Error GraphQL Buffer: {res['errors']}")
+        raise Exception(f"Error GraphQL Instagram: {res['errors']}")
     post_data = res.get("data", {}).get("createPost", {})
     if "message" in post_data:
-        raise Exception(f"Error Buffer: {post_data['message']}")
+        raise Exception(f"Error Buffer Instagram: {post_data['message']}")
+    print("✅ Publicat amb èxit a Instagram!")
 
-    print("🎉 Notícia publicada amb èxit a Instagram!")
+
+def publish_to_facebook(image_public_url, caption):
+    """Publica a la pàgina de Facebook via Buffer."""
+    if not BUFFER_FB_CHANNEL_ID:
+        print("ℹ️ BUFFER_FB_CHANNEL_ID no configurat. Ometent Facebook.")
+        return
+
+    print("🚀 Publicant a Facebook Page...")
+    query = """
+    mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess { post { id } }
+        ... on MutationError { message }
+      }
+    }
+    """
+    # A Facebook no s'han d'enviar metadades d'Instagram
+    variables = {
+        "input": {
+            "text": caption,
+            "channelId": BUFFER_FB_CHANNEL_ID,
+            "schedulingType": "automatic",
+            "mode": "shareNow",
+            "assets": [{"image": {"url": image_public_url}}]
+        }
+    }
+    headers = {"Authorization": f"Bearer {BUFFER_ACCESS_TOKEN}", "Content-Type": "application/json"}
+    res = requests.post("https://api.buffer.com", json={"query": query, "variables": variables}, headers=headers).json()
+    
+    if "errors" in res:
+        raise Exception(f"Error GraphQL Facebook: {res['errors']}")
+    post_data = res.get("data", {}).get("createPost", {})
+    if "message" in post_data:
+        raise Exception(f"Error Buffer Facebook: {post_data['message']}")
+    print("✅ Publicat amb èxit a Facebook!")
 
 
 def main():
@@ -397,12 +427,18 @@ def main():
     output_img = render_news_image(stock_img, headline)
 
     if MODE_PROVA:
-        print("\n🧪 MODE_PROVA = True. No es publica a Instagram, només s'envia a Telegram.")
+        print("\n🧪 MODE_PROVA = True. No es publica a xarxes, només s'envia a Telegram.")
         send_preview_to_telegram(output_img, caption, is_published=False)
     else:
-        print("\n🚀 MODE_PROVA = False. Iniciant publicació a Instagram...")
+        print("\n🚀 MODE_PROVA = False. Iniciant publicacions...")
         raw_url = push_image_to_github(output_img)
-        publish_image_to_buffer(raw_url, caption)
+        
+        # Publicar a Instagram
+        publish_to_instagram(raw_url, caption)
+        
+        # Publicar a Facebook (si està configurat el secret)
+        publish_to_facebook(raw_url, caption)
+        
         send_preview_to_telegram(output_img, caption, is_published=True)
 
 
