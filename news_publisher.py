@@ -140,7 +140,7 @@ def render_news_image(stock_path, headline_raw):
     top = (nh - CANVAS_H) // 2
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
 
-    # Imatge temporal per calcular amplades de text
+    # Imatge temporal per mesurar mides de text
     temp_draw = ImageDraw.Draw(img)
     max_text_w = CANVAS_W - 140  # Marges laterals de 70px
 
@@ -151,9 +151,9 @@ def render_news_image(stock_path, headline_raw):
     line_h = int(font_size * 1.12)
     total_text_h = len(lines) * line_h
     
-    bottom_margin = 120  # Espai reservat per "READ THE CAPTION"
+    bottom_margin = 120  # Espai reservat per al peu "READ THE CAPTION"
     text_start_y = CANVAS_H - bottom_margin - total_text_h
-    separator_y = text_start_y - 65
+    separator_y = text_start_y - 80  # Més marge superior per encabir el logo ampliat
 
     # 3. Generar degradat fosc segons l'alçada del text
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
@@ -162,31 +162,39 @@ def render_news_image(stock_path, headline_raw):
     gradient_top = max(0, separator_y - 320)
     for y in range(gradient_top, CANVAS_H):
         progress = (y - gradient_top) / (CANVAS_H - gradient_top)
-        # Corba exponencial perquè la zona de text sigui ben fosca
         alpha = int(255 * (progress ** 1.5))
         draw_g.line([(0, y), (CANVAS_W, y)], fill=(0, 0, 0, min(255, alpha)))
 
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
     draw = ImageDraw.Draw(final_img)
 
-    # 4. Dibuixar la línia amb el logo
+    # 4. Dibuixar la línia amb el logo (AMPLIAT A 72px)
     side_margin = 70
     logo_drawn = False
 
     if os.path.exists(LOGO_PATH):
         try:
             logo_img = Image.open(LOGO_PATH).convert("RGBA")
-            target_h = 44
+            
+            # Amplada i alçada objectiu
+            target_h = 72
             aspect = logo_img.width / logo_img.height
             target_w = int(target_h * aspect)
+            
+            # Límit màxim d'amplada per si és molt allargat
+            if target_w > 260:
+                target_w = 260
+                target_h = int(target_w / aspect)
+
             logo_resized = logo_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
             logo_x = (CANVAS_W - target_w) // 2
             logo_y = separator_y - (target_h // 2)
 
-            # Línies horitzontals als costats
-            draw.line([(side_margin, separator_y), (logo_x - 20, separator_y)], fill=(200, 200, 200, 220), width=2)
-            draw.line([(logo_x + target_w + 20, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(200, 200, 200, 220), width=2)
+            # Línies horitzontals als costats del logo
+            line_padding = 25
+            draw.line([(side_margin, separator_y), (logo_x - line_padding, separator_y)], fill=(200, 200, 200, 220), width=2)
+            draw.line([(logo_x + target_w + line_padding, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(200, 200, 200, 220), width=2)
 
             final_img.alpha_composite(logo_resized, (logo_x, logo_y))
             logo_drawn = True
@@ -194,7 +202,6 @@ def render_news_image(stock_path, headline_raw):
             print(f"⚠️ Avís: No s'ha pogut carregar el logo ({e}), usant text de contingència.")
 
     if not logo_drawn:
-        # Contingència textual si no hi ha imatge a assets/logo.png
         fallback_txt = ACCOUNT_NAME.upper()
         bbox = draw.textbbox((0, 0), fallback_txt, font=font_fallback_logo)
         txt_w = bbox[2] - bbox[0]
@@ -211,7 +218,7 @@ def render_news_image(stock_path, headline_raw):
     current_y = text_start_y
 
     COLOR_WHITE = (255, 255, 255)
-    COLOR_YELLOW = (255, 230, 0)  # Groc d'alt impacte
+    COLOR_YELLOW = (255, 230, 0)
 
     for line in lines:
         line_w = sum(w for _, _, w in line) + (len(line) - 1) * space_w
@@ -231,7 +238,6 @@ def render_news_image(stock_path, headline_raw):
     fb_w = fb_bbox[2] - fb_bbox[0]
     draw.text(((CANVAS_W - fb_w) // 2, CANVAS_H - 55), footer_text, font=font_footer, fill=(160, 160, 160))
 
-    # Desar resultat final en RGB
     final_output = final_img.convert("RGB")
     final_output.save(OUTPUT_IMAGE, quality=95)
 
@@ -273,7 +279,7 @@ def main():
     print("2. Descarregant foto d'estoc de Pexels...")
     stock_img = download_pexels_image(keyword)
 
-    print("3. Processant disseny (Anton, Groc/Blanc, Logo i línies)...")
+    print("3. Processant disseny (Anton, Groc/Blanc, Logo 72px i línies)...")
     output_img = render_news_image(stock_img, headline)
 
     print("4. Enviant preview a Telegram...")
