@@ -1,6 +1,6 @@
 import os
 import json
-import time
+import html
 import requests
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
@@ -8,12 +8,12 @@ from google import genai
 from google.genai import types
 
 # --- CONFIGURACIÓ ---
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-PEXELS_API_KEY = os.getenv('PEXELS_API_KEY')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-BRAND_NAME = "EL TEU COMPTE"  # Posa aquí el nom del teu compte/marca
+BRAND_NAME = "HOMER NEWS"
 OUTPUT_IMAGE = "preview_news.jpg"
 
 
@@ -41,7 +41,7 @@ def download_pexels_image(query):
     url = f"https://api.pexels.com/v1/search?query={query}&per_page=1&orientation=portrait"
     headers = {"Authorization": PEXELS_API_KEY}
     res = requests.get(url, headers=headers).json()
-    
+
     if res.get("photos"):
         img_url = res["photos"][0]["src"]["large2x"]
         img_data = requests.get(img_url).content
@@ -53,11 +53,10 @@ def download_pexels_image(query):
 
 
 def render_news_image(stock_path, titular, brand):
-    # Format vertical Instagram 4:5 (1080x1350)
     CANVAS_W, CANVAS_H = 1080, 1350
     img = Image.open(stock_path).convert("RGBA")
 
-    # Escalar i retallar mantenint proporcions
+    # Escalar i retallar a proporció 4:5
     img_ratio = img.width / img.height
     canvas_ratio = CANVAS_W / CANVAS_H
     if img_ratio > canvas_ratio:
@@ -72,7 +71,7 @@ def render_news_image(stock_path, titular, brand):
     top = (nh - CANVAS_H) // 2
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
 
-    # Degradat negre inferior
+    # Degradat fosc a la part inferior
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
     start_y = int(CANVAS_H * 0.42)
@@ -83,7 +82,7 @@ def render_news_image(stock_path, titular, brand):
     final_img = Image.alpha_composite(img, gradient).convert("RGB")
     draw = ImageDraw.Draw(final_img)
 
-    # Carregar tipografies
+    # Carregar fonts
     font_path = "assets/BebasNeue-Regular.ttf"
     if os.path.exists(font_path):
         font_headline = ImageFont.truetype(font_path, 76)
@@ -92,14 +91,14 @@ def render_news_image(stock_path, titular, brand):
         font_headline = ImageFont.load_default()
         font_brand = ImageFont.load_default()
 
-    # Divisió superior de la marca: —— BRAND ——
+    # Divisió de marca
     brand_line = f"—— {brand} ——"
     bbox_b = draw.textbbox((0, 0), brand_line, font=font_brand)
     bw = bbox_b[2] - bbox_b[0]
     brand_y = CANVAS_H - 480
     draw.text(((CANVAS_W - bw) / 2, brand_y), brand_line, font=font_brand, fill=(210, 210, 210))
 
-    # Dibuix del titular en línies
+    # Titular dividit en línies
     lines = textwrap.wrap(titular.upper(), width=22)
     text_y = brand_y + 55
     for line in lines:
@@ -110,31 +109,30 @@ def render_news_image(stock_path, titular, brand):
         text_y += lh + 18
 
     final_img.save(OUTPUT_IMAGE, quality=95)
-    
+
     if os.path.exists(stock_path):
         os.remove(stock_path)
     return OUTPUT_IMAGE
 
 
 def send_preview_to_telegram(image_path, caption):
-    """Envia la foto generada directament al teu xat de Telegram."""
     if not TELEGRAM_TOKEN or not CHAT_ID:
         raise Exception("Falten les variables TELEGRAM_TOKEN o CHAT_ID.")
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto" [INDEX_0]
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    caption_escaped = html.escape(caption)
+    caption_text = f"📰 <b>NOVA NOTÍCIA GENERADA (PREVIEW)</b>\n\n{caption_escaped}"
     
-    # Telegram admet un màxim de 1024 caràcters al caption d'una foto
-    caption_text = f"📰 <b>NOVA NOTÍCIA GENERADA (PREVIEW)</b>\n\n{caption}"
     if len(caption_text) > 1024:
         caption_text = caption_text[:1020] + "..."
 
-    with open(image_path, 'rb') as photo: [INDEX_0]
+    with open(image_path, "rb") as photo:
         payload = {
-            'chat_id': CHAT_ID,
-            'caption': caption_text, [INDEX_0]
-            'parse_mode': 'HTML'
+            "chat_id": CHAT_ID,
+            "caption": caption_text,
+            "parse_mode": "HTML"
         }
-        files = {'photo': photo} [INDEX_0]
+        files = {"photo": photo}
         res = requests.post(url, data=payload, files=files, timeout=30)
         res.raise_for_status()
 
@@ -156,7 +154,6 @@ def main():
     print("4. Enviant preview a Telegram...")
     send_preview_to_telegram(output_img, caption)
 
-    # Neteja local
     if os.path.exists(output_img):
         os.remove(output_img)
 
