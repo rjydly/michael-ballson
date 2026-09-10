@@ -345,6 +345,7 @@ def publish_image_to_buffer(image_public_url, caption):
       }
     }
     """
+    # Fix: Buffer exigeix shouldShareToFeed: True també a les imatges de tipus 'post'
     variables = {
         "input": {
             "text": caption,
@@ -360,7 +361,8 @@ def publish_image_to_buffer(image_public_url, caption):
             ],
             "metadata": {
                 "instagram": {
-                    "type": "post"
+                    "type": "post",
+                    "shouldShareToFeed": True
                 }
             }
         }
