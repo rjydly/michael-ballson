@@ -36,16 +36,23 @@ def ensure_font_exists():
 def generate_satirical_news():
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = """
-    You are a head writer for a viral satirical tech news outlet (like The Onion or El Mundo Today, but focused on AI, big tech, Silicon Valley, and internet culture).
+    You are a head writer for a viral satirical media outlet (like The Onion or Reductress) focused on POP CULTURE, EVERYDAY LIFE, and RELATABLE MODERN STRUGGLES that could happen to anyone.
     
-    CRITICAL: Everything must be in ENGLISH.
+    Topics to cover:
+    - Daily adult life, burnout, procrastination, bad life decisions.
+    - Dating apps, awkward social interactions, friendship drama.
+    - Pop culture trends, celebrity absurdities, shopping habits, grocery store anxiety.
+    - Modern workplace relatable humor, working from home dilemmas, caffeine addiction.
     
-    Generate a satirical news headline. In the headline, mark 2 to 4 of the most impactful, funny, or key words with double asterisks **like this** so they can be highlighted in yellow.
+    CRITICAL REQUIREMENTS:
+    - Everything MUST be written in 100% ENGLISH.
+    - Headline must be short, punchy, dramatic, and humorous (10-14 words max).
+    - In the headline, mark 2 to 3 of the most hilarious, punchy keywords with double asterisks **like this** so they will be highlighted in yellow.
     
-    Respond ONLY with valid JSON with these keys:
-    - "headline": Uppercase shocking satirical headline with **highlighted** words (e.g. "**OPENAI** ACCIDENTALLY REPLACES ENTIRE BOARD WITH **CONFUSED ROOMBA**")
-    - "search_query": Simple English photo search query for Pexels (e.g. "stressed man computer", "robot boardroom", "server room red lights", "nervous ceo")
-    - "caption": Engaging Instagram caption explaining the absurd satirical story in 2 short paragraphs with a funny punchline, followed by 4-5 relevant hashtags.
+    Respond ONLY with valid JSON with these exact keys:
+    - "headline": Uppercase relatable satirical headline with **highlighted** words (e.g. "**LOCAL MAN** SPENDS 45 MINUTES CHOOSING MOVIE, FALLS ASLEEP IN **FIRST 3 MINUTES**" or "**WOMAN** CANCELS ALL PLANS TO **STARE AT CEILING** FOR FREE")
+    - "search_query": Simple English photo search query for Pexels representing real everyday humans or realistic scenes (e.g. "tired person couch phone", "awkward couple coffee", "person grocery store confused", "exhausted woman bed", "stressed professional desk")
+    - "caption": Engaging, funny Instagram caption expanding on the joke in 2 quick witty paragraphs, ending with 4-5 relatable hashtags.
     """
 
     res = client.models.generate_content(
@@ -140,7 +147,6 @@ def render_news_image(stock_path, headline_raw):
     top = (nh - CANVAS_H) // 2
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
 
-    # Imatge temporal per mesurar mides de text
     temp_draw = ImageDraw.Draw(img)
     max_text_w = CANVAS_W - 140  # Marges laterals de 70px
 
@@ -151,18 +157,20 @@ def render_news_image(stock_path, headline_raw):
     line_h = int(font_size * 1.12)
     total_text_h = len(lines) * line_h
     
-    bottom_margin = 120  # Espai reservat per al peu "READ THE CAPTION"
+    bottom_margin = 120  # Espai per a "READ THE CAPTION"
     text_start_y = CANVAS_H - bottom_margin - total_text_h
-    separator_y = text_start_y - 80  # Més marge superior per encabir el logo ampliat
+    separator_y = text_start_y - 80
 
-    # 3. Generar degradat fosc segons l'alçada del text
+    # 3. Generar degradat fosc (MÉS ALT I PROFUND)
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
 
-    gradient_top = max(0, separator_y - 320)
+    # El degradat comença molt més amunt (al voltant del 28% de la imatge)
+    gradient_top = int(CANVAS_H * 0.28)
     for y in range(gradient_top, CANVAS_H):
         progress = (y - gradient_top) / (CANVAS_H - gradient_top)
-        alpha = int(255 * (progress ** 1.5))
+        # Corba d'enfosquiment progressiva que arriba al negre absolut abans del text
+        alpha = int(255 * (progress ** 1.15))
         draw_g.line([(0, y), (CANVAS_W, y)], fill=(0, 0, 0, min(255, alpha)))
 
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
@@ -176,12 +184,10 @@ def render_news_image(stock_path, headline_raw):
         try:
             logo_img = Image.open(LOGO_PATH).convert("RGBA")
             
-            # Amplada i alçada objectiu
             target_h = 72
             aspect = logo_img.width / logo_img.height
             target_w = int(target_h * aspect)
             
-            # Límit màxim d'amplada per si és molt allargat
             if target_w > 260:
                 target_w = 260
                 target_h = int(target_w / aspect)
@@ -191,7 +197,6 @@ def render_news_image(stock_path, headline_raw):
             logo_x = (CANVAS_W - target_w) // 2
             logo_y = separator_y - (target_h // 2)
 
-            # Línies horitzontals als costats del logo
             line_padding = 25
             draw.line([(side_margin, separator_y), (logo_x - line_padding, separator_y)], fill=(200, 200, 200, 220), width=2)
             draw.line([(logo_x + target_w + line_padding, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(200, 200, 200, 220), width=2)
@@ -271,7 +276,7 @@ def send_preview_to_telegram(image_path, caption):
 
 
 def main():
-    print("1. Generant titular satíric en anglès amb Gemini...")
+    print("1. Generant titular satíric en anglès amb Gemini (Pop culture / Everyday life)...")
     headline, keyword, caption = generate_satirical_news()
     print(f"👉 Headline: {headline}")
     print(f"👉 Keyword Pexels: {keyword}")
@@ -279,7 +284,7 @@ def main():
     print("2. Descarregant foto d'estoc de Pexels...")
     stock_img = download_pexels_image(keyword)
 
-    print("3. Processant disseny (Anton, Groc/Blanc, Logo 72px i línies)...")
+    print("3. Processant disseny (Anton, Groc/Blanc, Blackfade ampliat)...")
     output_img = render_news_image(stock_img, headline)
 
     print("4. Enviant preview a Telegram...")
