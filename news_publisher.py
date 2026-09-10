@@ -37,29 +37,34 @@ def generate_satirical_news():
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = """
-    You are the legendary Editor-in-Chief of a viral satirical media brand (in the spirit of The Onion, Reductress, and top-tier internet meme satire).
+    You are the Editor-in-Chief of a viral satirical news outlet (in the style of The Onion and Reductress).
+    
+    TARGET AUDIENCE & CULTURAL CONTEXT:
+    - Primary Audience: Young adults, Millennials, and Gen Z residing in EUROPE and NORTH AMERICA (US, UK, Canada, and EU).
+    - Cultural Touchpoints: Shared Western modern lifestyle—remote work dilemmas, budget airline luggage nightmares, Sunday evening anxiety, flatmate/roommate dynamics, expensive specialty coffee, self-checkout machine arguments, subscription fatigue (paying for 5 streaming apps to watch nothing), and modern dating culture.
+    - Avoid ultra-niche local political references. Focus on universal human absurdities that anyone living in London, New York, Berlin, Toronto, Paris, or Barcelona instantly relates to.
     
     YOUR COMIC FORMULA:
-    Take an insanely petty, embarrassing, or hyper-relatable everyday human behavior and report on it with the DEADPAN SERIOUSNESS of breaking Pulitzer-winning news.
+    Take an insanely petty, embarrassing, or hyper-relatable everyday human struggle and report on it with the DEADPAN SERIOUSNESS of breaking Pulitzer-winning news.
     
     STUDY THESE EXCELLENT HEADLINE EXAMPLES:
     - Example 1: "**MAN** ACCIDENTALLY CLOSES 48 OPEN BROWSER TABS HE WAS '**DEFINITELY GOING TO READ** LATER'"
     - Example 2: "**WOMAN** BUYS $8 ICED MATCHA LATTE TO MOTIVATE HERSELF TO WORK FOR **EXACTLY 6 MINUTES**"
     - Example 3: "**SCIENTISTS CONFIRM** 90% OF YOUR TIREDNESS WOULD DISAPPEAR IF YOU JUST **DRANK SOME DAMN WATER**"
     - Example 4: "**LOCAL MAN** REWARDS HIMSELF FOR COMPLETING ONE TINY TASK WITH A **4-HOUR COMA NAP**"
-    - Example 5: "**WOMAN** REHEARSES ENTIRE ARGUMENT IN SHOWER AGAINST SOMEONE WHO HAS **NO IDEA SHE IS ANGRY**"
+    - Example 5: "**TRAVELER** SUFFERS SEVERE ANXIETY WATCHING FLIGHT ATTENDANT INSPECT **SLIGHTLY BULGING BACKPACK**"
     - Example 6: "**COUPLE** REACHES DANGEROUS LEVEL OF COMFORT WHERE THEY ONLY COMMUNICATE IN **UNINTELLIGIBLE GRUNTS**"
     
     RULES:
-    1. Everything MUST be in ENGLISH.
+    1. Everything MUST be written in 100% ENGLISH.
     2. Headline must be punchy (10 to 14 words max).
     3. Put double asterisks **around 2 to 3 punchy keywords** that should be colored bright yellow.
     4. The caption MUST expand on the absurd premise with 2 hilarious, deadpan journalistic paragraphs.
-    5. CRITICAL: At the very end of the caption, ALWAYS include an explicit, funny disclaimer stating that this is SATIRE (e.g. "(Disclaimer: This is satire. Please do not cite us in court.)" or "(Note: This is satire / fake news, but painfully real.)") followed by 4-5 relevant hashtags.
+    5. At the very end of the caption, ALWAYS include an explicit, witty disclaimer stating that this is SATIRE (e.g. "(Disclaimer: This is satire. Please do not cite us in court.)" or "(Note: This is satire / fake news, but painfully real.)") followed by 4-5 relevant hashtags.
     
     Respond ONLY with valid JSON with these exact keys:
     - "headline": Uppercase headline string with **highlighted** words.
-    - "search_query": Simple English photo search query for Pexels representing realistic everyday humans/situations (e.g. "stressed woman kitchen counter", "tired man in bed phone", "couple sitting sofa distant", "confused customer coffee shop").
+    - "search_query": Simple English photo search query for Pexels representing realistic everyday humans/situations (e.g. "stressed woman kitchen counter", "tired man in bed phone", "couple sitting sofa distant", "confused passenger airport gate").
     - "caption": Full caption text including the satirical joke breakdown, the satire disclaimer, and hashtags.
     """
 
@@ -137,7 +142,7 @@ def render_news_image(stock_path, headline_raw):
     font_size = 76
     font_headline = ImageFont.truetype(font_file, font_size)
     font_footer = ImageFont.truetype(font_file, 26)
-    font_fallback_logo = ImageFont.truetype(font_file, 34)
+    font_fallback_logo = ImageFont.truetype(font_file, 44)
 
     # 1. Carregar i retallar imatge a proporció 4:5
     img = Image.open(stock_path).convert("RGBA")
@@ -167,7 +172,9 @@ def render_news_image(stock_path, headline_raw):
     
     bottom_margin = 120  # Espai per a "READ THE CAPTION"
     text_start_y = CANVAS_H - bottom_margin - total_text_h
-    separator_y = text_start_y - 80
+    
+    # Més espai vertical per acollir el logo de 110px sense tocar el text
+    separator_y = text_start_y - 100
 
     # 3. Generar degradat fosc (comença al 28% superior)
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
@@ -182,20 +189,22 @@ def render_news_image(stock_path, headline_raw):
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
     draw = ImageDraw.Draw(final_img)
 
-    # 4. Dibuixar la línia amb el logo (AMPLIAT A 72px)
-    side_margin = 70
+    # 4. Dibuixar la línia amb el logo (AMPLIAT A 110px D'ALÇADA)
+    side_margin = 60
     logo_drawn = False
 
     if os.path.exists(LOGO_PATH):
         try:
             logo_img = Image.open(LOGO_PATH).convert("RGBA")
             
-            target_h = 72
+            # --- MIDA DEL LOGO ENCARA MÉS GRAN ---
+            target_h = 110
             aspect = logo_img.width / logo_img.height
             target_w = int(target_h * aspect)
             
-            if target_w > 260:
-                target_w = 260
+            # Límit màxim ampliat per a logos horitzontals
+            if target_w > 360:
+                target_w = 360
                 target_h = int(target_w / aspect)
 
             logo_resized = logo_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
@@ -203,9 +212,10 @@ def render_news_image(stock_path, headline_raw):
             logo_x = (CANVAS_W - target_w) // 2
             logo_y = separator_y - (target_h // 2)
 
-            line_padding = 25
-            draw.line([(side_margin, separator_y), (logo_x - line_padding, separator_y)], fill=(200, 200, 200, 220), width=2)
-            draw.line([(logo_x + target_w + line_padding, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(200, 200, 200, 220), width=2)
+            # Línies horitzontals (gruix 3px per acompanyar el logo gran)
+            line_padding = 30
+            draw.line([(side_margin, separator_y), (logo_x - line_padding, separator_y)], fill=(210, 210, 210, 220), width=3)
+            draw.line([(logo_x + target_w + line_padding, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(210, 210, 210, 220), width=3)
 
             final_img.alpha_composite(logo_resized, (logo_x, logo_y))
             logo_drawn = True
@@ -220,8 +230,8 @@ def render_news_image(stock_path, headline_raw):
         txt_x = (CANVAS_W - txt_w) // 2
         txt_y = separator_y - (txt_h // 2) - 4
 
-        draw.line([(side_margin, separator_y), (txt_x - 20, separator_y)], fill=(200, 200, 200, 220), width=2)
-        draw.line([(txt_x + txt_w + 20, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(200, 200, 200, 220), width=2)
+        draw.line([(side_margin, separator_y), (txt_x - 25, separator_y)], fill=(210, 210, 210, 220), width=3)
+        draw.line([(txt_x + txt_w + 25, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(210, 210, 210, 220), width=3)
         draw.text((txt_x, txt_y), fallback_txt, font=font_fallback_logo, fill=(230, 230, 230))
 
     # 5. Dibuixar el titular paraula a paraula (Blanc i Groc)
@@ -282,7 +292,7 @@ def send_preview_to_telegram(image_path, caption):
 
 
 def main():
-    print("1. Generant titular satíric d'alt impacte amb Gemini...")
+    print("1. Generant titular per a audiència Europa / Nord-amèrica amb Gemini...")
     headline, keyword, caption = generate_satirical_news()
     print(f"👉 Headline: {headline}")
     print(f"👉 Keyword Pexels: {keyword}")
