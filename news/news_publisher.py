@@ -6,6 +6,7 @@ import html
 import time
 import subprocess
 import requests
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 # ==============================================================================
@@ -79,6 +80,62 @@ def mark_news_as_done(news_id, rows):
         writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
         writer.writeheader()
         writer.writerows(rows)
+
+
+# --- DETECCIÓ I ELIMINACIÓ DE FRANGES SÒLIDES (LETTERBOXING) ---
+def remove_solid_letterboxes(img, std_threshold=6.0, max_crop_ratio=0.25):
+    """
+    Detecta i retalla automàticament franges de color sòlid uniforme (blanques, negres, etc.)
+    que envolten la imatge a causa de captures de pantalla o marcs de memes.
+    """
+    arr = np.array(img.convert("RGB"))
+    h, w, _ = arr.shape
+
+    # 1. Analitzar part superior (Top)
+    top = 0
+    max_top = int(h * max_crop_ratio)
+    for y in range(max_top):
+        row = arr[y, :, :]
+        if np.std(row) < std_threshold:
+            top = y + 1
+        else:
+            break
+
+    # 2. Analitzar part inferior (Bottom)
+    bottom = h
+    min_bottom = int(h * (1 - max_crop_ratio))
+    for y in range(h - 1, min_bottom, -1):
+        row = arr[y, :, :]
+        if np.std(row) < std_threshold:
+            bottom = y
+        else:
+            break
+
+    # 3. Analitzar lateral esquerre (Left)
+    left = 0
+    max_left = int(w * max_crop_ratio)
+    for x in range(max_left):
+        col = arr[:, x, :]
+        if np.std(col) < std_threshold:
+            left = x + 1
+        else:
+            break
+
+    # 4. Analitzar lateral dret (Right)
+    right = w
+    min_right = int(w * (1 - max_crop_ratio))
+    for x in range(w - 1, min_right, -1):
+        col = arr[:, x, :]
+        if np.std(col) < std_threshold:
+            right = x
+        else:
+            break
+
+    if top > 0 or bottom < h or left > 0 or right < w:
+        print(f"✂️ Retallades franges sòlides: Top={top}px, Bottom={h-bottom}px, Left={left}px, Right={w-right}px")
+        img = img.crop((left, top, right, bottom))
+
+    return img
 
 
 # --- DESCÀRREGA D'IMATGES VIA SERPER (GOOGLE IMAGES) ---
@@ -206,8 +263,11 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     font_footer = ImageFont.truetype(font_file, 26)
     font_fallback_logo = ImageFont.truetype(font_file, 44)
 
-    img = Image.open(source_image_path).convert("RGBA")
-    img_ratio = img.width / img.height
+    # 1. Carregar imatge i eliminar barres blanques/negres abans d'escalar
+    raw_img = Image.open(source_image_path).convert("RGBA")
+    cleaned_img = remove_solid_letterboxes(raw_img)
+
+    img_ratio = cleaned_img.width / cleaned_img.height
     canvas_ratio = CANVAS_W / CANVAS_H
     if img_ratio > canvas_ratio:
         nh = CANVAS_H
@@ -216,7 +276,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
         nw = CANVAS_W
         nh = int(CANVAS_W / img_ratio)
 
-    img = img.resize((nw, nh), Image.Resampling.LANCZOS)
+    img = cleaned_img.resize((nw, nh), Image.Resampling.LANCZOS)
     left = (nw - CANVAS_W) // 2
     top = int((nh - CANVAS_H) * 0.10) if nh > CANVAS_H else 0
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
@@ -234,6 +294,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     text_start_y = CANVAS_H - bottom_margin - total_text_h
     separator_y = text_start_y - 95
 
+    # 2. Degradat negre
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
 
@@ -246,6 +307,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
     draw = ImageDraw.Draw(final_img)
 
+    # 3. Logo central i línies
     side_margin = 60
     logo_drawn = False
 
@@ -281,6 +343,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
         draw.line([(txt_x + txt_w + 25, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(210, 210, 210, 220), width=3)
         draw.text((txt_x, txt_y), fallback_txt, font=font_fallback_logo, fill=(230, 230, 230))
 
+    # 4. Text del titular
     space_w = draw.textbbox((0, 0), " ", font=font_headline)[2]
     current_y = text_start_y
     for line in lines:
@@ -292,6 +355,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
             cur_x += w + space_w
         current_y += line_h
 
+    # 5. Peu de pàgina amb fletxa vectorial
     draw_footer_with_arrow(draw, CANVAS_W, CANVAS_H, footer_text, font_footer, draw_arrow=has_arrow)
 
     final_img.convert("RGB").save(output_path, quality=95)
@@ -299,7 +363,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
 
 
 def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
-    """Renderitza la Slide 4: sense línies, amb el logo més gran i el grup logo+text centrat completament."""
+    """Renderitza la Slide 4: logo ampliat + text centrat amb contorn negre (stroke)."""
     CANVAS_W, CANVAS_H = 1080, 1350
     font_file = ensure_font_exists()
 
@@ -377,7 +441,7 @@ def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
     else:
         draw.text((logo_x, logo_y), ACCOUNT_NAME.upper(), font=font_fallback_logo, fill=(235, 235, 235))
 
-    # Pintar text centrat horitzontalment sota el logo
+    # Pintar text centrat horitzontalment sota el logo AMB CONTORN NEGRE
     space_w = draw.textbbox((0, 0), " ", font=font_headline)[2]
     current_y = logo_y + logo_h + gap
 
@@ -386,15 +450,30 @@ def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
         cur_x = (CANVAS_W - line_w) // 2
         for word, is_highlight, w in line:
             color = (255, 230, 0) if is_highlight else (255, 255, 255)
-            draw.text((cur_x, current_y), word, font=font_headline, fill=color)
+            # stroke_width=4 i stroke_fill=(0, 0, 0) per al contorn negre nítid
+            draw.text(
+                (cur_x, current_y),
+                word,
+                font=font_headline,
+                fill=color,
+                stroke_width=4,
+                stroke_fill=(0, 0, 0)
+            )
             cur_x += w + space_w
         current_y += line_h
 
-    # 5. Peu inferior
+    # 5. Peu inferior amb subtil contorn
     if footer_text:
         fb_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
         fb_w = fb_bbox[2] - fb_bbox[0]
-        draw.text(((CANVAS_W - fb_w) // 2, CANVAS_H - 55), footer_text, font=font_footer, fill=(160, 160, 160))
+        draw.text(
+            ((CANVAS_W - fb_w) // 2, CANVAS_H - 55),
+            footer_text,
+            font=font_footer,
+            fill=(200, 200, 200),
+            stroke_width=2,
+            stroke_fill=(0, 0, 0)
+        )
 
     final_img.convert("RGB").save(output_path, quality=95)
     return output_path
@@ -539,7 +618,7 @@ def main():
     render_slide(temp_img2, h2, "SWIPE", out_slide2, has_arrow=True)
     render_slide(temp_img3, h3, "READ THE CAPTION", out_slide3, has_arrow=False)
 
-    # Slide 4: Disseny net centrat estil Canva (logo gran + text agrupats al mig)
+    # Slide 4: Disseny net centrat estil Canva (logo gran + text amb perfilat negre)
     render_outro_slide(temp_img4, h4, "HOMER.NEWS", out_slide4)
 
     carousel_paths = [out_slide1, out_slide2, out_slide3, out_slide4]
