@@ -4,3 +4,4 @@ requests==2.32.3
 yt-dlp
 google-genai==1.2.0
 pillow==10.4.0
+duckduckgo_search==7.5.0
