@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 # ==============================================================================
 # CONFIGURACIÓ PRINCIPAL
 # ==============================================================================
-MODE_PROVA = False
+MODE_PROVA = True
 
 ACCOUNT_NAME = "@homer.news"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
