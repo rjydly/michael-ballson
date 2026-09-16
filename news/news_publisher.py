@@ -11,7 +11,7 @@ from duckduckgo_search import DDGS
 # ==============================================================================
 # CONFIGURACIÓ PRINCIPAL
 # ==============================================================================
-MODE_PROVA = False  # False = Publica a Instagram/Facebook via Buffer i marca 'done'
+MODE_PROVA = True  # False = Publica a Instagram/Facebook via Buffer i marca 'done'
 
 ACCOUNT_NAME = "@homer.news"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
