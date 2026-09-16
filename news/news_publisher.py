@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 # ==============================================================================
 # CONFIGURACIÓ PRINCIPAL
 # ==============================================================================
-MODE_PROVA = True
+MODE_PROVA = False
 
 ACCOUNT_NAME = "@homer.news"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -185,9 +185,7 @@ def draw_footer_with_arrow(draw, canvas_w, canvas_h, text, font, draw_arrow=True
         ax = start_x + txt_w + gap
         ay = base_y + (txt_h // 2) + 2
 
-        # Línia central de la fletxa
         draw.line([(ax, ay), (ax + arrow_w - 6, ay)], fill=color, width=3)
-        # Capçalera triangular neta
         head_len = 9
         head_h = 6
         points = [
@@ -199,6 +197,7 @@ def draw_footer_with_arrow(draw, canvas_w, canvas_h, text, font, draw_arrow=True
 
 
 def render_slide(source_image_path, headline_raw, footer_text, output_path, has_arrow=False):
+    """Renderitza les diapositives 1, 2 i 3 amb degradat, logo i línies separadores."""
     CANVAS_W, CANVAS_H = 1080, 1350
     font_file = ensure_font_exists()
 
@@ -207,7 +206,6 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     font_footer = ImageFont.truetype(font_file, 26)
     font_fallback_logo = ImageFont.truetype(font_file, 44)
 
-    # 1. Carregar i retallar 4:5 orientat a la part alta (Top-Bias)
     img = Image.open(source_image_path).convert("RGBA")
     img_ratio = img.width / img.height
     canvas_ratio = CANVAS_W / CANVAS_H
@@ -220,8 +218,6 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
 
     img = img.resize((nw, nh), Image.Resampling.LANCZOS)
     left = (nw - CANVAS_W) // 2
-
-    # Retall superior perquè el cap quedi a la meitat superior visible
     top = int((nh - CANVAS_H) * 0.10) if nh > CANVAS_H else 0
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
 
@@ -238,7 +234,6 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     text_start_y = CANVAS_H - bottom_margin - total_text_h
     separator_y = text_start_y - 95
 
-    # 2. Degradat negre
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
 
@@ -251,7 +246,6 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
     draw = ImageDraw.Draw(final_img)
 
-    # 3. Logo central i línies
     side_margin = 60
     logo_drawn = False
 
@@ -287,7 +281,6 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
         draw.line([(txt_x + txt_w + 25, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(210, 210, 210, 220), width=3)
         draw.text((txt_x, txt_y), fallback_txt, font=font_fallback_logo, fill=(230, 230, 230))
 
-    # 4. Text del titular
     space_w = draw.textbbox((0, 0), " ", font=font_headline)[2]
     current_y = text_start_y
     for line in lines:
@@ -299,8 +292,109 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
             cur_x += w + space_w
         current_y += line_h
 
-    # 5. Peu de pàgina amb fletxa vectorial
     draw_footer_with_arrow(draw, CANVAS_W, CANVAS_H, footer_text, font_footer, draw_arrow=has_arrow)
+
+    final_img.convert("RGB").save(output_path, quality=95)
+    return output_path
+
+
+def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
+    """Renderitza la Slide 4: sense línies, amb el logo més gran i el grup logo+text centrat completament."""
+    CANVAS_W, CANVAS_H = 1080, 1350
+    font_file = ensure_font_exists()
+
+    font_size = 76
+    font_headline = ImageFont.truetype(font_file, font_size)
+    font_footer = ImageFont.truetype(font_file, 26)
+    font_fallback_logo = ImageFont.truetype(font_file, 58)
+
+    # 1. Carregar i retallar fons a proporció 4:5
+    img = Image.open(bg_image_path).convert("RGBA")
+    img_ratio = img.width / img.height
+    canvas_ratio = CANVAS_W / CANVAS_H
+    if img_ratio > canvas_ratio:
+        nh = CANVAS_H
+        nw = int(CANVAS_H * img_ratio)
+    else:
+        nw = CANVAS_W
+        nh = int(CANVAS_W / img_ratio)
+
+    img = img.resize((nw, nh), Image.Resampling.LANCZOS)
+    left = (nw - CANVAS_W) // 2
+    top = (nh - CANVAS_H) // 2
+    img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
+
+    final_img = img.copy()
+    draw = ImageDraw.Draw(final_img)
+
+    # 2. Parsejar i calcular el bloc de text
+    temp_draw = ImageDraw.Draw(final_img)
+    max_text_w = CANVAS_W - 140
+    parsed_words = parse_headline_words(headline_raw)
+    lines = wrap_words_to_lines(parsed_words, font_headline, max_text_w, temp_draw)
+
+    line_h = int(font_size * 1.15)
+    text_total_h = len(lines) * line_h
+
+    # 3. Preparar el logo ampliat (target_h = 200px)
+    logo_drawn = False
+    logo_w, logo_h = 0, 0
+    logo_resized = None
+
+    if os.path.exists(LOGO_PATH):
+        try:
+            logo_img = Image.open(LOGO_PATH).convert("RGBA")
+            target_h = 200
+            aspect = logo_img.width / logo_img.height
+            target_w = int(target_h * aspect)
+            if target_w > 480:
+                target_w = 480
+                target_h = int(target_w / aspect)
+
+            logo_resized = logo_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            logo_w, logo_h = target_w, target_h
+            logo_drawn = True
+        except Exception as e:
+            print(f"⚠️ Avís amb el logo ampliat: {e}")
+
+    if not logo_drawn:
+        fallback_txt = ACCOUNT_NAME.upper()
+        bbox = draw.textbbox((0, 0), fallback_txt, font=font_fallback_logo)
+        logo_w = bbox[2] - bbox[0]
+        logo_h = bbox[3] - bbox[1]
+
+    # 4. Agrupació estil Canva: Centrar [Logo + Espai + Text] al mig exacte de la pantalla
+    gap = 48
+    total_group_h = logo_h + gap + text_total_h
+    group_start_y = (CANVAS_H - total_group_h) // 2
+
+    # Pintar logo centrat horitzontalment
+    logo_x = (CANVAS_W - logo_w) // 2
+    logo_y = group_start_y
+
+    if logo_drawn and logo_resized:
+        final_img.alpha_composite(logo_resized, (logo_x, logo_y))
+    else:
+        draw.text((logo_x, logo_y), ACCOUNT_NAME.upper(), font=font_fallback_logo, fill=(235, 235, 235))
+
+    # Pintar text centrat horitzontalment sota el logo
+    space_w = draw.textbbox((0, 0), " ", font=font_headline)[2]
+    current_y = logo_y + logo_h + gap
+
+    for line in lines:
+        line_w = sum(w for _, _, w in line) + (len(line) - 1) * space_w
+        cur_x = (CANVAS_W - line_w) // 2
+        for word, is_highlight, w in line:
+            color = (255, 230, 0) if is_highlight else (255, 255, 255)
+            draw.text((cur_x, current_y), word, font=font_headline, fill=color)
+            cur_x += w + space_w
+        current_y += line_h
+
+    # 5. Peu inferior
+    if footer_text:
+        fb_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
+        fb_w = fb_bbox[2] - fb_bbox[0]
+        draw.text(((CANVAS_W - fb_w) // 2, CANVAS_H - 55), footer_text, font=font_footer, fill=(160, 160, 160))
 
     final_img.convert("RGB").save(output_path, quality=95)
     return output_path
@@ -417,7 +511,7 @@ def main():
 
     print(f"\n🎬 Processant Notícia #{news_id}")
 
-    # 1. Descarregar imatges web reals via Serper (Google Images)
+    # 1. Descarregar imatges web reals via Serper
     temp_img1 = os.path.join(IMAGES_DIR, f"temp_{news_id}_1.jpg")
     temp_img2 = os.path.join(IMAGES_DIR, f"temp_{news_id}_2.jpg")
     temp_img3 = os.path.join(IMAGES_DIR, f"temp_{news_id}_3.jpg")
@@ -440,10 +534,13 @@ def main():
     out_slide3 = os.path.join(IMAGES_DIR, f"news_{news_id}_s3.jpg")
     out_slide4 = os.path.join(IMAGES_DIR, f"news_{news_id}_s4.jpg")
 
+    # Slides 1, 2 i 3: Disseny periodístic amb línies, degradat i logo petit
     render_slide(temp_img1, h1, "SWIPE FOR FULL STORY", out_slide1, has_arrow=True)
     render_slide(temp_img2, h2, "SWIPE", out_slide2, has_arrow=True)
     render_slide(temp_img3, h3, "READ THE CAPTION", out_slide3, has_arrow=False)
-    render_slide(temp_img4, h4, "HOMER.NEWS", out_slide4, has_arrow=False)
+
+    # Slide 4: Disseny net centrat estil Canva (logo gran + text agrupats al mig)
+    render_outro_slide(temp_img4, h4, "HOMER.NEWS", out_slide4)
 
     carousel_paths = [out_slide1, out_slide2, out_slide3, out_slide4]
 
