@@ -605,7 +605,7 @@ def main():
         temp_img4 = os.path.join(IMAGES_DIR, "temp_outro_fallback.jpg")
         Image.new("RGB", (1080, 1350), color=(18, 18, 22)).save(temp_img4)
 
-    h4 = "FOLLOW **@HOMER.NEWS** FOR MORE UNFILTERED **BREAKING SATIRE**"
+    h4 = "FOLLOW **@HOMER.NEWS** FOR MORE UNFILTERED **BREAKING NEWS**"
 
     # 3. Renderitzar les 4 diapositives
     out_slide1 = os.path.join(IMAGES_DIR, f"news_{news_id}_s1.jpg")
