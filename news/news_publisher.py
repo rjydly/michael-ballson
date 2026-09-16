@@ -12,6 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 # ==============================================================================
 # CONFIGURACIÓ PRINCIPAL
 # ==============================================================================
+# True  -> Només genera el carrousel i l'envia a Telegram (mode test).
+# False -> Publica a Instagram + Facebook via Buffer, sincronitza amb GitHub i envia a Telegram.
 MODE_PROVA = False
 
 ACCOUNT_NAME = "@homer.news"
@@ -30,18 +32,20 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 BUFFER_ACCESS_TOKEN = os.getenv("BUFFER_ACCESS_TOKEN")
-BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")
-BUFFER_FB_CHANNEL_ID = os.getenv("BUFFER_FB_CHANNEL_ID")
+BUFFER_CHANNEL_ID = os.getenv("BUFFER_CHANNEL_ID")          # Canal d'Instagram
+BUFFER_FB_CHANNEL_ID = os.getenv("BUFFER_FB_CHANNEL_ID")    # Pàgina de Facebook
 GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
 
 
 def ensure_workspace():
+    """Assegura l'existència de les carpetes de treball necessàries."""
     os.makedirs(ASSETS_DIR, exist_ok=True)
     os.makedirs(IMAGES_DIR, exist_ok=True)
     os.makedirs(NEWS_DIR, exist_ok=True)
 
 
 def ensure_font_exists():
+    """Descarrega la font Anton de Google Fonts si no existeix a assets."""
     ensure_workspace()
     if not os.path.exists(FONT_PATH):
         print("⬇️ Descarregant font Anton de Google Fonts...")
@@ -53,6 +57,7 @@ def ensure_font_exists():
 
 
 def get_next_pending_news():
+    """Llegeix el CSV i retorna la primera notícia amb status buit."""
     if not os.path.exists(CSV_FILE):
         raise Exception(f"No s'ha trobat el fitxer {CSV_FILE}!")
 
@@ -70,6 +75,7 @@ def get_next_pending_news():
 
 
 def mark_news_as_done(news_id, rows):
+    """Marca la fila de la notícia com a 'done' al CSV."""
     for r in rows:
         if str(r["id"]) == str(news_id):
             r["status"] = "done"
@@ -140,6 +146,7 @@ def remove_solid_letterboxes(img, std_threshold=6.0, max_crop_ratio=0.25):
 
 # --- DESCÀRREGA D'IMATGES VIA SERPER (GOOGLE IMAGES) ---
 def search_and_download_image(query, target_filename):
+    """Cerca imatges d'alta qualitat a Google filtrant bancs de pagament amb marca d'aigua."""
     print(f"🔍 Cercant a Google Images via Serper: '{query}'...")
     
     clean_query = f"{query} -alamy -gettyimages -shutterstock -istockphoto -dreamstime"
@@ -180,7 +187,7 @@ def search_and_download_image(query, target_filename):
         except Exception:
             continue
 
-    print(f"⚠️ Fallback fosc per '{query}'.")
+    print(f"⚠️ No s'ha trobat cap imatge vàlida. Fent servir fons d'estudi per a '{query}'.")
     fallback_img = Image.new("RGB", (1080, 1350), color=(25, 25, 30))
     fallback_img.save(target_filename)
     return target_filename
@@ -188,6 +195,7 @@ def search_and_download_image(query, target_filename):
 
 # --- MOTOR GRÀFIC PILLOW ---
 def parse_headline_words(headline_text):
+    """Identifica paraules envoltades amb ** per pintar-les de groc."""
     tokens = re.split(r'(\*\*.*?\*\*)', headline_text)
     parsed = []
     for token in tokens:
@@ -203,6 +211,7 @@ def parse_headline_words(headline_text):
 
 
 def wrap_words_to_lines(parsed_words, font, max_width, draw):
+    """Ajusta les paraules a línies respectant l'amplada màxima del llenç."""
     space_w = draw.textbbox((0, 0), " ", font=font)[2]
     lines, current_line, current_w = [], [], 0
 
@@ -225,6 +234,7 @@ def wrap_words_to_lines(parsed_words, font, max_width, draw):
 
 
 def draw_footer_with_arrow(draw, canvas_w, canvas_h, text, font, draw_arrow=True):
+    """Dibuixa el text del peu acompanyat d'una fletxa vectorial estilitzada."""
     color = (175, 175, 175)
     bbox = draw.textbbox((0, 0), text, font=font)
     txt_w = bbox[2] - bbox[0]
@@ -242,7 +252,9 @@ def draw_footer_with_arrow(draw, canvas_w, canvas_h, text, font, draw_arrow=True
         ax = start_x + txt_w + gap
         ay = base_y + (txt_h // 2) + 2
 
+        # Línia central de la fletxa
         draw.line([(ax, ay), (ax + arrow_w - 6, ay)], fill=color, width=3)
+        # Capçalera triangular neta
         head_len = 9
         head_h = 6
         points = [
@@ -254,7 +266,7 @@ def draw_footer_with_arrow(draw, canvas_w, canvas_h, text, font, draw_arrow=True
 
 
 def render_slide(source_image_path, headline_raw, footer_text, output_path, has_arrow=False):
-    """Renderitza les diapositives 1, 2 i 3 amb degradat, logo i línies separadores."""
+    """Renderitza les diapositives 1, 2 i 3 amb degradat, logo, línies i retall net."""
     CANVAS_W, CANVAS_H = 1080, 1350
     font_file = ensure_font_exists()
 
@@ -263,7 +275,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     font_footer = ImageFont.truetype(font_file, 26)
     font_fallback_logo = ImageFont.truetype(font_file, 44)
 
-    # 1. Carregar imatge i eliminar barres blanques/negres abans d'escalar
+    # 1. Carregar imatge i eliminar barres blanques/negres
     raw_img = Image.open(source_image_path).convert("RGBA")
     cleaned_img = remove_solid_letterboxes(raw_img)
 
@@ -278,6 +290,8 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
 
     img = cleaned_img.resize((nw, nh), Image.Resampling.LANCZOS)
     left = (nw - CANVAS_W) // 2
+
+    # Retall superior (Top-Bias) per protegir les cares dels subjectes
     top = int((nh - CANVAS_H) * 0.10) if nh > CANVAS_H else 0
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
 
@@ -294,7 +308,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     text_start_y = CANVAS_H - bottom_margin - total_text_h
     separator_y = text_start_y - 95
 
-    # 2. Degradat negre
+    # 2. Degradat negre profund
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
 
@@ -307,7 +321,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path, has_
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
     draw = ImageDraw.Draw(final_img)
 
-    # 3. Logo central i línies
+    # 3. Logo central i línies separadores
     side_margin = 60
     logo_drawn = False
 
@@ -400,7 +414,7 @@ def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
     line_h = int(font_size * 1.15)
     text_total_h = len(lines) * line_h
 
-    # 3. Preparar el logo ampliat (target_h = 200px)
+    # 3. Logo ampliat per a l'outro (target_h = 200px)
     logo_drawn = False
     logo_w, logo_h = 0, 0
     logo_resized = None
@@ -441,7 +455,7 @@ def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
     else:
         draw.text((logo_x, logo_y), ACCOUNT_NAME.upper(), font=font_fallback_logo, fill=(235, 235, 235))
 
-    # Pintar text centrat horitzontalment sota el logo AMB CONTORN NEGRE
+    # Pintar text sota el logo AMB CONTORN NEGRE (stroke)
     space_w = draw.textbbox((0, 0), " ", font=font_headline)[2]
     current_y = logo_y + logo_h + gap
 
@@ -450,7 +464,7 @@ def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
         cur_x = (CANVAS_W - line_w) // 2
         for word, is_highlight, w in line:
             color = (255, 230, 0) if is_highlight else (255, 255, 255)
-            # stroke_width=4 i stroke_fill=(0, 0, 0) per al contorn negre nítid
+            # stroke_width=4 i stroke_fill=(0, 0, 0) per a un contorn negre nítid
             draw.text(
                 (cur_x, current_y),
                 word,
@@ -462,7 +476,7 @@ def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
             cur_x += w + space_w
         current_y += line_h
 
-    # 5. Peu inferior amb subtil contorn
+    # 5. Peu inferior
     if footer_text:
         fb_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
         fb_w = fb_bbox[2] - fb_bbox[0]
@@ -481,6 +495,7 @@ def render_outro_slide(bg_image_path, headline_raw, footer_text, output_path):
 
 # --- GIT I BUFFER ---
 def push_carousel_to_github(image_paths, news_id):
+    """Puja les 4 imatges del carrousel i el CSV a GitHub amb URLs úniques."""
     print("🌐 Sincronitzant carrousel i CSV amb GitHub...")
     subprocess.run(["git", "config", "--local", "user.email", "bot@github.com"], check=True)
     subprocess.run(["git", "config", "--local", "user.name", "NewsBot"], check=True)
@@ -504,8 +519,11 @@ def push_carousel_to_github(image_paths, news_id):
 
 
 def publish_carousel_to_buffer(image_urls, caption, channel_id, platform="instagram"):
+    """Publica el carrousel a Instagram o Facebook via Buffer."""
     if not channel_id:
+        print(f"⚠️ Channel ID per a {platform} no està configurat a les variables d'entorn! S'omet.")
         return
+
     print(f"🚀 Publicant Carrousel a {platform.capitalize()}...")
     query = """
     mutation CreatePost($input: CreatePostInput!) {
@@ -516,8 +534,11 @@ def publish_carousel_to_buffer(image_urls, caption, channel_id, platform="instag
     }
     """
     assets_payload = [{"image": {"url": u}} for u in image_urls]
+    
+    # Tant Instagram com Facebook utilitzen type = "post" a l'API de Buffer.
+    # En rebre múltiples fotos a 'assets', Buffer i Instagram el publiquen com a carrousel.
     metadata_payload = (
-        {"instagram": {"type": "carousel", "shouldShareToFeed": True}}
+        {"instagram": {"type": "post", "shouldShareToFeed": True}}
         if platform == "instagram"
         else {"facebook": {"type": "post"}}
     )
@@ -533,13 +554,22 @@ def publish_carousel_to_buffer(image_urls, caption, channel_id, platform="instag
         }
     }
     headers = {"Authorization": f"Bearer {BUFFER_ACCESS_TOKEN}", "Content-Type": "application/json"}
+    
     res = requests.post("https://api.buffer.com", json={"query": query, "variables": variables}, headers=headers, timeout=25).json()
+
     if "errors" in res:
-        raise Exception(f"Error Buffer {platform}: {res['errors']}")
-    print(f"✅ Carrousel publicat amb èxit a {platform.capitalize()}!")
+        raise Exception(f"Error GraphQL Buffer ({platform}): {res['errors']}")
+    
+    post_data = res.get("data", {}).get("createPost", {})
+    if "message" in post_data:
+        raise Exception(f"Error Buffer ({platform}): {post_data['message']}")
+
+    post_id = post_data.get("post", {}).get("id", "Desconegut")
+    print(f"✅ Carrousel publicat amb èxit a {platform.capitalize()}! ID del post: {post_id}")
 
 
 def send_telegram_carousel(image_paths, caption, is_published=False):
+    """Envia un àlbum natiu de fotos a Telegram amb el text adjunt a la primera slide."""
     if not TELEGRAM_TOKEN or not CHAT_ID:
         return
 
@@ -599,12 +629,13 @@ def main():
     search_and_download_image(q2, temp_img2)
     search_and_download_image(q3, temp_img3)
 
-    # 2. Slide 4 (Outro)
+    # 2. Slide 4 (Outro amb background_news.png)
     temp_img4 = OUTRO_BG_PATH
     if not os.path.exists(temp_img4):
         temp_img4 = os.path.join(IMAGES_DIR, "temp_outro_fallback.jpg")
         Image.new("RGB", (1080, 1350), color=(18, 18, 22)).save(temp_img4)
 
+    # Text oficial de tancament amb BREAKING NEWS
     h4 = "FOLLOW **@HOMER.NEWS** FOR MORE UNFILTERED **BREAKING NEWS**"
 
     # 3. Renderitzar les 4 diapositives
@@ -634,8 +665,12 @@ def main():
         mark_news_as_done(news_id, all_rows)
         public_urls = push_carousel_to_github(carousel_paths, news_id)
 
+        # Publicació a Instagram
         publish_carousel_to_buffer(public_urls, caption, BUFFER_CHANNEL_ID, platform="instagram")
+        # Publicació a Facebook
         publish_carousel_to_buffer(public_urls, caption, BUFFER_FB_CHANNEL_ID, platform="facebook")
+        
+        # Enviar còpia a Telegram
         send_telegram_carousel(carousel_paths, caption, is_published=True)
 
 
