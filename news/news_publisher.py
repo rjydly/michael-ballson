@@ -1,17 +1,17 @@
 import os
 import re
 import csv
+import json
 import html
 import time
 import subprocess
 import requests
 from PIL import Image, ImageDraw, ImageFont
-from duckduckgo_search import DDGS
 
 # ==============================================================================
 # CONFIGURACIÓ PRINCIPAL
 # ==============================================================================
-MODE_PROVA = True  # False = Publica a Instagram/Facebook via Buffer i marca 'done'
+MODE_PROVA = True
 
 ACCOUNT_NAME = "@homer.news"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +23,8 @@ ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 FONT_PATH = os.path.join(ASSETS_DIR, "Anton-Regular.ttf")
 OUTRO_BG_PATH = os.path.join(ASSETS_DIR, "background_news.png")
+
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -79,47 +81,49 @@ def mark_news_as_done(news_id, rows):
         writer.writerows(rows)
 
 
-# --- DESCÀRREGA D'IMATGES WEB (DUCKDUCKGO) ---
+# --- DESCÀRREGA D'IMATGES VIA SERPER (GOOGLE IMAGES) ---
 def search_and_download_image(query, target_filename):
-    print(f"🔍 Cercant imatge a internet per: '{query}'...")
+    print(f"🔍 Cercant a Google Images via Serper: '{query}'...")
+    
+    clean_query = f"{query} -alamy -gettyimages -shutterstock -istockphoto -dreamstime"
+    url = "https://google.serper.dev/images"
+    payload = json.dumps({"q": clean_query, "num": 8})
     headers = {
+        'X-API-KEY': SERPER_API_KEY,
+        'Content-Type': 'application/json'
+    }
+
+    images = []
+    try:
+        response = requests.post(url, headers=headers, data=payload, timeout=15)
+        data = response.json()
+        images = data.get("images", [])
+    except Exception as e:
+        print(f"⚠️ Error connectant amb Serper API: {e}")
+
+    dl_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
 
-    image_url = None
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.images(query, max_results=5))
-            if results:
-                image_url = results[0].get("image")
-    except Exception as e:
-        print(f"⚠️ Avís cercant a DuckDuckGo: {e}")
+    banned = ["alamy.com", "gettyimages", "shutterstock", "istockphoto", "dreamstime", "stockphoto"]
+    for img_obj in images:
+        img_url = img_obj.get("imageUrl")
+        if not img_url or any(b in img_url.lower() for b in banned):
+            continue
 
-    if not image_url:
-        print(f"⚠️ Cerca fallida per '{query}'. Fent cerca de seguretat...")
         try:
-            with DDGS() as ddgs:
-                results = list(ddgs.images(query.split()[0] + " news viral", max_results=5))
-                if results:
-                    image_url = results[0].get("image")
-        except Exception:
-            pass
-
-    if image_url:
-        try:
-            res = requests.get(image_url, headers=headers, timeout=20)
-            if res.status_code == 200:
+            r = requests.get(img_url, headers=dl_headers, timeout=12)
+            if r.status_code == 200 and len(r.content) > 15000:
                 with open(target_filename, "wb") as f:
-                    f.write(res.content)
-                # Validar que és una imatge vàlida
+                    f.write(r.content)
                 with Image.open(target_filename) as test_img:
                     test_img.verify()
+                print(f"✅ Imatge descarregada: {img_url[:60]}...")
                 return target_filename
-        except Exception as e:
-            print(f"⚠️ Error descarregant imatge de {image_url}: {e}")
+        except Exception:
+            continue
 
-    # Imatge neutra de reserva si la descàrrega web falla completament
-    print("ℹ️ Creant fons fosc de reserva...")
+    print(f"⚠️ Fallback fosc per '{query}'.")
     fallback_img = Image.new("RGB", (1080, 1350), color=(25, 25, 30))
     fallback_img.save(target_filename)
     return target_filename
@@ -163,7 +167,38 @@ def wrap_words_to_lines(parsed_words, font, max_width, draw):
     return lines
 
 
-def render_slide(source_image_path, headline_raw, footer_text, output_path):
+def draw_footer_with_arrow(draw, canvas_w, canvas_h, text, font, draw_arrow=True):
+    color = (175, 175, 175)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    txt_w = bbox[2] - bbox[0]
+    txt_h = bbox[3] - bbox[1]
+
+    gap = 14
+    arrow_w = 26
+    total_w = txt_w + (gap + arrow_w if draw_arrow else 0)
+    start_x = (canvas_w - total_w) // 2
+    base_y = canvas_h - 55
+
+    draw.text((start_x, base_y), text, font=font, fill=color)
+
+    if draw_arrow:
+        ax = start_x + txt_w + gap
+        ay = base_y + (txt_h // 2) + 2
+
+        # Línia central de la fletxa
+        draw.line([(ax, ay), (ax + arrow_w - 6, ay)], fill=color, width=3)
+        # Capçalera triangular neta
+        head_len = 9
+        head_h = 6
+        points = [
+            (ax + arrow_w, ay),
+            (ax + arrow_w - head_len, ay - head_h),
+            (ax + arrow_w - head_len, ay + head_h)
+        ]
+        draw.polygon(points, fill=color)
+
+
+def render_slide(source_image_path, headline_raw, footer_text, output_path, has_arrow=False):
     CANVAS_W, CANVAS_H = 1080, 1350
     font_file = ensure_font_exists()
 
@@ -172,7 +207,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path):
     font_footer = ImageFont.truetype(font_file, 26)
     font_fallback_logo = ImageFont.truetype(font_file, 44)
 
-    # 1. Carregar i retallar imatge 4:5
+    # 1. Carregar i retallar 4:5 orientat a la part alta (Top-Bias)
     img = Image.open(source_image_path).convert("RGBA")
     img_ratio = img.width / img.height
     canvas_ratio = CANVAS_W / CANVAS_H
@@ -185,7 +220,9 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path):
 
     img = img.resize((nw, nh), Image.Resampling.LANCZOS)
     left = (nw - CANVAS_W) // 2
-    top = (nh - CANVAS_H) // 2
+
+    # Retall superior perquè el cap quedi a la meitat superior visible
+    top = int((nh - CANVAS_H) * 0.10) if nh > CANVAS_H else 0
     img = img.crop((left, top, left + CANVAS_W, top + CANVAS_H))
 
     temp_draw = ImageDraw.Draw(img)
@@ -201,7 +238,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path):
     text_start_y = CANVAS_H - bottom_margin - total_text_h
     separator_y = text_start_y - 95
 
-    # 2. Degradat negre profund
+    # 2. Degradat negre
     gradient = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 0))
     draw_g = ImageDraw.Draw(gradient)
 
@@ -214,7 +251,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path):
     final_img = Image.alpha_composite(img, gradient).convert("RGBA")
     draw = ImageDraw.Draw(final_img)
 
-    # 3. Logo central i línies separadores
+    # 3. Logo central i línies
     side_margin = 60
     logo_drawn = False
 
@@ -250,7 +287,7 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path):
         draw.line([(txt_x + txt_w + 25, separator_y), (CANVAS_W - side_margin, separator_y)], fill=(210, 210, 210, 220), width=3)
         draw.text((txt_x, txt_y), fallback_txt, font=font_fallback_logo, fill=(230, 230, 230))
 
-    # 4. Text Anton amb ressaltat groc
+    # 4. Text del titular
     space_w = draw.textbbox((0, 0), " ", font=font_headline)[2]
     current_y = text_start_y
     for line in lines:
@@ -262,16 +299,14 @@ def render_slide(source_image_path, headline_raw, footer_text, output_path):
             cur_x += w + space_w
         current_y += line_h
 
-    # 5. Peu de pàgina
-    fb_bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
-    fb_w = fb_bbox[2] - fb_bbox[0]
-    draw.text(((CANVAS_W - fb_w) // 2, CANVAS_H - 55), footer_text, font=font_footer, fill=(170, 170, 170))
+    # 5. Peu de pàgina amb fletxa vectorial
+    draw_footer_with_arrow(draw, CANVAS_W, CANVAS_H, footer_text, font_footer, draw_arrow=has_arrow)
 
     final_img.convert("RGB").save(output_path, quality=95)
     return output_path
 
 
-# --- GIT I BUFFER CARROUSEL ---
+# --- GIT I BUFFER ---
 def push_carousel_to_github(image_paths, news_id):
     print("🌐 Sincronitzant carrousel i CSV amb GitHub...")
     subprocess.run(["git", "config", "--local", "user.email", "bot@github.com"], check=True)
@@ -354,7 +389,6 @@ def send_telegram_carousel(image_paths, caption, is_published=False):
         files[file_key] = open(path, "rb")
 
     try:
-        import json
         payload = {"chat_id": CHAT_ID, "media": json.dumps(media)}
         res = requests.post(url, data=payload, files=files, timeout=35)
         res.raise_for_status()
@@ -372,12 +406,7 @@ def main():
     news_item, all_rows = get_next_pending_news()
 
     if not news_item:
-        print("⚠️ No hi ha cap notícia pendent al CSV! Executa generate_batch.py.")
-        if TELEGRAM_TOKEN and CHAT_ID:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={
-                "chat_id": CHAT_ID,
-                "text": "⚠️ <b>ALERTA:</b> La cua de notícies carrousel a <code>news_database.csv</code> s'ha buidat!"
-            }, timeout=10)
+        print("⚠️ No hi ha cap notícia pendent al CSV!")
         return
 
     news_id = news_item["id"]
@@ -387,11 +416,8 @@ def main():
     caption = news_item["caption"]
 
     print(f"\n🎬 Processant Notícia #{news_id}")
-    print(f"👉 Slide 1: {h1}")
-    print(f"👉 Slide 2: {h2}")
-    print(f"👉 Slide 3: {h3}")
 
-    # 1. Descarregar imatges web per a les slides 1, 2 i 3
+    # 1. Descarregar imatges web reals via Serper (Google Images)
     temp_img1 = os.path.join(IMAGES_DIR, f"temp_{news_id}_1.jpg")
     temp_img2 = os.path.join(IMAGES_DIR, f"temp_{news_id}_2.jpg")
     temp_img3 = os.path.join(IMAGES_DIR, f"temp_{news_id}_3.jpg")
@@ -400,10 +426,9 @@ def main():
     search_and_download_image(q2, temp_img2)
     search_and_download_image(q3, temp_img3)
 
-    # 2. Slide 4 (Outro amb background_news.png)
+    # 2. Slide 4 (Outro)
     temp_img4 = OUTRO_BG_PATH
     if not os.path.exists(temp_img4):
-        print("ℹ️ 'assets/background_news.png' no trobat. Fent servir fons fosc d'estudi...")
         temp_img4 = os.path.join(IMAGES_DIR, "temp_outro_fallback.jpg")
         Image.new("RGB", (1080, 1350), color=(18, 18, 22)).save(temp_img4)
 
@@ -415,19 +440,18 @@ def main():
     out_slide3 = os.path.join(IMAGES_DIR, f"news_{news_id}_s3.jpg")
     out_slide4 = os.path.join(IMAGES_DIR, f"news_{news_id}_s4.jpg")
 
-    render_slide(temp_img1, h1, "SWIPE FOR FULL STORY ➔", out_slide1)
-    render_slide(temp_img2, h2, "SWIPE ➔", out_slide2)
-    render_slide(temp_img3, h3, "READ THE CAPTION", out_slide3)
-    render_slide(temp_img4, h4, "HOMER.NEWS", out_slide4)
+    render_slide(temp_img1, h1, "SWIPE FOR FULL STORY", out_slide1, has_arrow=True)
+    render_slide(temp_img2, h2, "SWIPE", out_slide2, has_arrow=True)
+    render_slide(temp_img3, h3, "READ THE CAPTION", out_slide3, has_arrow=False)
+    render_slide(temp_img4, h4, "HOMER.NEWS", out_slide4, has_arrow=False)
 
     carousel_paths = [out_slide1, out_slide2, out_slide3, out_slide4]
 
-    # Netejar temporals de descàrrega
     for p in [temp_img1, temp_img2, temp_img3]:
         if os.path.exists(p): os.remove(p)
 
     if MODE_PROVA:
-        print("\n🧪 MODE_PROVA = True. Enviant preview del carrousel a Telegram...")
+        print("\n🧪 MODE_PROVA = True. Enviant preview a Telegram...")
         send_telegram_carousel(carousel_paths, caption, is_published=False)
     else:
         print("\n🚀 MODE_PROVA = False. Pujant carrousel i publicant...")
